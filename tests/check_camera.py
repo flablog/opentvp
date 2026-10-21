@@ -1,8 +1,10 @@
-"""Rendu final (à travers la caméra) comparé aux rendus TVPaint du corpus caméra.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Les Fées Spéciales
+"""Final render (through the camera) compared with the TVPaint renders of the camera corpus.
 
-Le modèle de caméra n'est pas exact au pixel (voir docs/FORMAT.md) : chaque cas a une
-valeur de référence dans tests/baseline_camera.json (pire frame, % de pixels écartés de
-plus de 16/255). Le test échoue si un cas se dégrade de plus de 0,05 point.
+The camera model is not pixel-exact (see docs/FORMAT.md): each case has a baseline
+value in tests/baseline_camera.json (worst frame, % of pixels off by more than
+16/255). The test fails if a case gets worse by more than 0.05 points.
 
     python tests/check_camera.py [--impl c|python] [--update-baseline]
 """
@@ -25,7 +27,7 @@ def main():
     a = ap.parse_args()
     refs = json.load(open(os.path.join(CORPUS, 'camera_refs.json')))
     base = json.load(open(BASELINE)) if os.path.exists(BASELINE) else {}
-    tmp = tempfile.mkdtemp(prefix='tvpp_cam_')
+    tmp = tempfile.mkdtemp(prefix='opentvp_cam_')
     new, bad = {}, 0
     for r in refs:
         tv = os.path.join(CORPUS, r['tvpp'])
@@ -37,14 +39,14 @@ def main():
         key = r['tvpp']
         new[key] = round(worst, 3)
         ref = base.get(key)
-        status = '' if ref is None else ('OK' if worst <= ref + 0.05 else f'DÉGRADÉ (référence {ref}%)')
-        bad += status.startswith('D')
-        print(f"{key:58} {n:3} frames  >16 : {worst:6.3f}%  max {maxd:3}  {status}")
+        status = '' if ref is None else ('OK' if worst <= ref + 0.05 else f'REGRESSED (baseline {ref}%)')
+        bad += status.startswith('R')
+        print(f"{key:58} {n:3} frames  >16: {worst:6.3f}%  max {maxd:3}  {status}")
     shutil.rmtree(tmp, True)
     if a.update_baseline:
         json.dump(new, open(BASELINE, 'w'), indent=1)
-        print('référence mise à jour :', BASELINE)
-    print(f"\n[{a.impl}] {len(refs)} cas, {bad} dégradé(s)")
+        print('baseline updated:', BASELINE)
+    print(f"\n[{a.impl}] {len(refs)} cases, {bad} regressed")
     return 1 if bad else 0
 
 

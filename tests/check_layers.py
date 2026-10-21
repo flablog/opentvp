@@ -1,8 +1,10 @@
-"""Export calque par calque (--layers --keyframes) comparé à l'export de structure de TVPaint
-(tv_ClipSaveStructure : CSV + PNG par instance) sur tout le corpus.
-Vérifie le décodage des pixels, les tenues, les instances, les comportements avant/après.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Les Fées Spéciales
+"""Layer-by-layer export (--layers --keyframes) compared with TVPaint's structure export
+(tv_ClipSaveStructure: CSV + one PNG per instance) over the whole corpus.
+Checks pixel decoding, holds, instances, pre/post behaviours.
 
-    python tests/check_layers.py [--impl c|python] [dossier ...]
+    python tests/check_layers.py [--impl c|python] [folder ...]
 """
 import argparse
 import glob
@@ -24,7 +26,7 @@ def main():
     ap.add_argument('dirs', nargs='*')
     a = ap.parse_args()
     dirs = a.dirs or sorted(glob.glob(os.path.join(CORPUS, 'data', '*')))
-    tmp = tempfile.mkdtemp(prefix='tvpp_test_')
+    tmp = tempfile.mkdtemp(prefix='opentvp_test_')
     nfiles = nframes = nbad = 0
     for d in dirs:
         for f in sorted(glob.glob(os.path.join(d, '*.tvpp'))):
@@ -37,13 +39,13 @@ def main():
                 run(a.impl, f, out, '--clip', str(clip_index(f, clip)), '--layers', 'all',
                     '--include-hidden', '--keyframes', '--frames', f'0-{len(gframes) - 1}')
             except RuntimeError as e:
-                print(f"{os.path.basename(base):34} ERREUR {e}")
+                print(f"{os.path.basename(base):34} ERROR {e}")
                 nbad += 1
                 continue
             doc = json.load(open(glob.glob(out + '/*.json')[0], encoding='utf-8'))
             errs, missing = [], set()
-            # Le CSV ne liste, à chaque frame, que les calques qui changent d'instance ;
-            # le préfixe « [NNN] » du nom de fichier donne le calque (ordre de #Layers).
+            # At each frame, the CSV only lists the layers that change instance;
+            # the "[NNN]" file name prefix gives the layer (#Layers order).
             names = meta['#Layers']
             for li, gname in enumerate(names):
                 same = [L for L in doc['layers'] if L['name'] == gname]
@@ -55,7 +57,7 @@ def main():
                     name = next((x for x in row if x.startswith(tag)), '')
                     if name:
                         gp = os.path.join(sub, name)
-                        if not os.path.exists(gp):          # vérité terrain incomplète
+                        if not os.path.exists(gp):          # incomplete ground truth
                             missing.add(li)
                             cur = None
                             continue
@@ -68,14 +70,14 @@ def main():
                     dd = int((np.any(mine != cur, axis=2) & visible).sum())
                     nframes += 1
                     if dd:
-                        errs.append(f'calque {li + 1} frame {fr} : {dd} px')
+                        errs.append(f'layer {li + 1} frame {fr}: {dd} px')
             nfiles += 1
             nbad += bool(errs)
-            note = f"  (PNG de référence manquants pour le calque {', '.join(str(i + 1) for i in sorted(missing))})" if missing else ''
+            note = f"  (reference PNGs missing for layer {', '.join(str(i + 1) for i in sorted(missing))})" if missing else ''
             print(f"{os.path.basename(base):34} {'OK' if not errs else ', '.join(errs[:3])}{note}")
             shutil.rmtree(out, True)
     shutil.rmtree(tmp, True)
-    print(f"\n[{a.impl}] {nfiles} fichiers, {nframes} frames comparées, {nbad} en échec")
+    print(f"\n[{a.impl}] {nfiles} files, {nframes} frames compared, {nbad} failed")
     return 1 if nbad else 0
 
 

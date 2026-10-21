@@ -1,4 +1,6 @@
-"""Outils partagés par les tests : lancer l'implémentation C ou Python, lire la vérité terrain TVPaint."""
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Les Fées Spéciales
+"""Helpers shared by the tests: run the C or Python implementation, read TVPaint ground truth."""
 import glob
 import os
 import subprocess
@@ -12,25 +14,25 @@ CORPUS = os.path.join(ROOT, 'corpus')
 sys.path.insert(0, os.path.join(ROOT, 'python'))
 
 
-def tvpp_cmd(impl):
-    """Commande de base pour l'implémentation choisie ('c' ou 'python')."""
+def opentvp_cmd(impl):
+    """Base command for the chosen implementation ('c' or 'python')."""
     if impl == 'python':
-        return [sys.executable, os.path.join(ROOT, 'python', 'tvpp_render.py')]
-    exe = os.environ.get('TVPP_BIN') or os.path.join(ROOT, 'c', 'build', 'tvpp' + ('.exe' if os.name == 'nt' else ''))
+        return [sys.executable, os.path.join(ROOT, 'python', 'opentvp_render.py')]
+    exe = os.environ.get('OPENTVP_BIN') or os.path.join(ROOT, 'c', 'build', 'opentvp' + ('.exe' if os.name == 'nt' else ''))
     if not os.path.exists(exe):
-        sys.exit(f"binaire introuvable : {exe} (lancer c/build.sh, ou définir TVPP_BIN)")
+        sys.exit(f"binary not found: {exe} (run c/build.sh, or set OPENTVP_BIN)")
     return [exe, 'render']
 
 
 def run(impl, tvpp, out, *args):
-    r = subprocess.run(tvpp_cmd(impl) + [tvpp, out] + list(args), capture_output=True, text=True)
+    r = subprocess.run(opentvp_cmd(impl) + [tvpp, out] + list(args), capture_output=True, text=True)
     if r.returncode:
         raise RuntimeError(r.stderr[-500:] or r.stdout[-500:])
     return r.stdout
 
 
 def read_gt(base):
-    """CSV de tv_ClipSaveStructure : (nom du clip, métadonnées par calque, lignes par frame)."""
+    """tv_ClipSaveStructure CSV: (clip name, per-layer metadata, per-frame rows)."""
     lines = open(base + '_gt.csv', encoding='utf-8').read().splitlines()
     clip = lines[2].split(',')[0].strip().strip('"')
     meta = {x.split(',')[0]: [v.strip().strip('"') for v in x.split(',')[1:]]
@@ -41,7 +43,7 @@ def read_gt(base):
 
 
 def clip_index(tvpp, name):
-    import tvpp_info as ti
+    import opentvp_info as ti
     clips = ti.read_tvpp(tvpp)['clips']
     for c in clips:
         if c['name'] == name:
@@ -54,7 +56,7 @@ def load_rgb(path):
 
 
 def compare_dirs(mine_glob, ref_fmt):
-    """Compare chaque image produite à la référence ; renvoie (pire % de pixels > 16, écart max, n)."""
+    """Compares each produced image with the reference; returns (worst % of pixels > 16, max difference, n)."""
     worst = maxd = n = 0
     for f in sorted(glob.glob(mine_glob)):
         num = int(f[-8:-4])

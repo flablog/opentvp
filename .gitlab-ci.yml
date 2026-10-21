@@ -1,0 +1,73 @@
+# Tests on every push to main and on merge requests.
+# Pushing a vX.Y.Z tag (matching the VERSION file) builds every platform and publishes a release
+# whose zips are stored in the project's generic package registry.
+
+stages: [test, build, release]
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PACKAGE_URL: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/opentvp"
+
+default:
+  image: python:3.12
+  cache:
+    key: pip
+    paths: [.cache/pip]
+
+tests:
+  stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG =~ /^v/
+  script:
+    - pip install -r python/requirements.txt
+    - ./tests/run_all.sh
+
+build:
+  stage: build
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+  script:
+    - test "v$(cat VERSION)" = "$CI_COMMIT_TAG"
+    - pip install -r python/requirements.txt ziglang==0.17.0
+    - ./c/build.sh all
+    - ./c/package.sh
+    - |
+      V=$(cat VERSION)
+      for f in dist/*.zip; do
+        curl --fail --header "JOB-TOKEN: $CI_JOB_TOKEN" --upload-file "$f" "$PACKAGE_URL/$V/$(basename "$f")"
+      done
+      echo "VERSION=$V" > version.env
+  artifacts:
+    paths: [dist/*.zip]
+    reports:
+      dotenv: version.env
+    expire_in: 1 week
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+  needs: [build]
+  script:
+    - echo "Release $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    name: "opentvp $CI_COMMIT_TAG"
+    description: "opentvp $CI_COMMIT_TAG: Windows, macOS (universal) and Linux (static) binaries, plus the Python version."
+    assets:
+      links:
+        - name: "opentvp-${VERSION}-windows.zip"
+          url: "${PACKAGE_URL}/${VERSION}/opentvp-${VERSION}-windows.zip"
+          link_type: package
+        - name: "opentvp-${VERSION}-macos.zip"
+          url: "${PACKAGE_URL}/${VERSION}/opentvp-${VERSION}-macos.zip"
+          link_type: package
+        - name: "opentvp-${VERSION}-linux.zip"
+          url: "${PACKAGE_URL}/${VERSION}/opentvp-${VERSION}-linux.zip"
+          link_type: package
+        - name: "opentvp-python-${VERSION}.zip"
+          url: "${PACKAGE_URL}/${VERSION}/opentvp-python-${VERSION}.zip"
+          link_type: package

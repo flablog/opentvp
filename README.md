@@ -1,40 +1,46 @@
-# tvpp
+# opentvp
 
-Lire, rendre et exporter des fichiers TVPaint Animation 11 (`.tvpp`) sans TVPaint, en ligne de commande, sur un poste ou un serveur sans interface.
+Read, render and export TVPaint Animation 11 files (`.tvpp`) without TVPaint, from the command line, on a workstation or a headless server.
 
-- `tvpp info plan.tvpp` : structure (résolution, cadence, clips, calques, caméra), en texte ou en JSON.
-- `tvpp render plan.tvpp sortie` : rendu final composé, à travers la caméra.
-- `tvpp render plan.tvpp sortie --layers [--keyframes]` : un dossier par calque, avec toutes les frames ou seulement les dessins, plus un JSON d'exposition.
+- `opentvp info shot.tvpp`: structure (resolution, frame rate, clips, layers, camera), as text or JSON.
+- `opentvp render shot.tvpp out`: final composited render, through the camera.
+- `opentvp render shot.tvpp out --layers [--keyframes]`: one folder per layer, with every frame or only the drawings, plus an exposure JSON.
 
-Le format a été établi par rétro-ingénierie (Les Fées Spéciales, 2026) et il est documenté dans [`docs/FORMAT.md`](docs/FORMAT.md).
+The format was reverse-engineered (Les Fées Spéciales, 2026) and is documented in [`docs/FORMAT.md`](docs/FORMAT.md).
 
-## Télécharger
+## Download
 
-Les binaires se trouvent dans les **Releases** : `tvpp-X.Y.Z-windows.zip`, `-macos.zip` (universel Apple Silicon + Intel), `-linux.zip` (statique), et `tvpp-python-X.Y.Z.zip`. Le mode d'emploi est dans [`docs/UTILISATION.md`](docs/UTILISATION.md).
+Binaries are in the **Releases**: `opentvp-X.Y.Z-windows.zip`, `-macos.zip` (universal Apple Silicon + Intel), `-linux.zip` (static), and `opentvp-python-X.Y.Z.zip`. The user guide is [`docs/USAGE.md`](docs/USAGE.md).
 
-## Contenu du dépôt
+## Repository layout
 
-| dossier | contenu |
+| folder | content |
 |---|---|
-| `c/` | l'outil livré : `tvpp.c` + libdeflate (MIT) ; `build.sh`, `package.sh` |
-| `python/` | implémentation de référence (prototypage), mêmes sorties que le C |
-| `corpus/` | scripts George qui génèrent les fichiers de test, et ces fichiers avec la vérité terrain TVPaint |
-| `tests/` | comparaison des deux implémentations avec la vérité terrain TVPaint |
-| `docs/` | format, mode d'emploi, format du JSON d'export |
+| `c/` | the shipped tool: `opentvp.c` + libdeflate (MIT); `build.sh`, `package.sh` |
+| `python/` | reference implementation (prototyping), same outputs as the C |
+| `corpus/` | George scripts that generate the test files, and those files with TVPaint ground truth |
+| `tests/` | comparison of both implementations with TVPaint ground truth |
+| `docs/` | format, user guide, export JSON format |
 
-## Développer
+## Development
 
 ```
 pip install -r python/requirements.txt ziglang
-./c/build.sh            # binaire natif dans c/build/
-./tests/run_all.sh      # corpus : C et Python
-./c/build.sh all        # + tvpp.exe, tvpp-macos, tvpp-linux
+./c/build.sh            # native binary in c/build/
+./tests/run_all.sh      # corpus: C and Python
+./c/build.sh all        # + opentvp.exe, opentvp-macos, opentvp-linux
 ```
 
-## Publier une version
+## Releasing
 
-1. Mettre à jour `VERSION`, par exemple `0.4.0`.
-2. Committer, puis `git tag v0.4.0 && git push --tags`.
-3. La CI lance les tests, compile pour toutes les plateformes et publie la release avec les zips.
+1. Update `VERSION`, for example `0.4.0`.
+2. Commit, then `git tag v0.4.0 && git push --tags`.
+3. CI runs the tests, builds for every platform and publishes the release with the zips.
 
-Le C et le Python partagent la même version : une release contient les deux.
+C and Python share the same version: a release contains both.
+
+## License
+
+GPL v3 or later (`GPL-3.0-or-later`), see [LICENSE](LICENSE). © 2026 Les Fées Spéciales.
+
+Third-party code built into the binary: libdeflate (MIT, `c/third_party/libdeflate/COPYING`); for the static Linux binary, musl (MIT, `c/third_party/musl/COPYRIGHT`). The licenses are included in the release archives. Python dependencies: numpy (BSD), Pillow (MIT-CMU).

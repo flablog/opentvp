@@ -1,11 +1,11 @@
-# tvpp en Python (implémentation de référence)
+# opentvp in Python (reference implementation)
 
 ```
-pip install -r requirements.txt          # numpy, Pillow (tvpp_info.py n'a besoin de rien)
-python tvpp_info.py plan.tvpp [--json]
-python tvpp_render.py plan.tvpp sortie [--layers [LISTE]] [--keyframes] [--camera] ...
+pip install -r requirements.txt          # numpy, Pillow (opentvp_info.py needs nothing)
+python opentvp_info.py shot.tvpp [--json]
+python opentvp_render.py shot.tvpp out [--layers [LIST]] [--keyframes] [--camera] ...
 ```
 
-Les options et les sorties sont les mêmes que celles de l'exe (`docs/UTILISATION.md`, `docs/EXPORT_CALQUES.md`), avec une option en plus : `--jobs N`, qui exporte plusieurs calques en parallèle (Linux et Mac seulement).
+Options and outputs are the same as the executable's (`docs/USAGE.md`, `docs/LAYER_EXPORT.md`), with one extra option: `--jobs N`, which exports several layers in parallel (Linux and Mac only).
 
-C'est la version à modifier pour essayer une idée. L'exe C est la version à livrer : les deux doivent produire des sorties identiques (`tests/run_all.sh`).
+This is the version to change when trying out an idea. The C executable is the version that ships: both must produce identical outputs (`tests/run_all.sh`).

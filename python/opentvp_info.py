@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""tvpp_info — affiche la structure d'un fichier TVPaint (.tvpp) sans TVPaint.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Les Fées Spéciales
+"""opentvp_info — prints the structure of a TVPaint file (.tvpp) without TVPaint.
 
-Usage :
-    python tvpp_info.py fichier.tvpp [fichier2.tvpp ...]
-    python tvpp_info.py fichier.tvpp --json        # sortie JSON (pipeline)
+Usage:
+    python opentvp_info.py file.tvpp [file2.tvpp ...]
+    python opentvp_info.py file.tvpp --json        # JSON output (pipeline)
 
-Aucune dépendance : bibliothèque standard Python 3.8+ uniquement.
-Ne décode pas les pixels : la lecture est quasi instantanée, même sur de gros plans.
+No dependencies: Python 3.8+ standard library only.
+Does not decode pixels: reading is near-instant, even on large shots.
 
-Format établi par rétro-ingénierie sur TVPaint Animation 11.7 (Les Fées Spéciales).
+Format reverse-engineered on TVPaint Animation 11.7 (Les Fées Spéciales).
 """
 import json
 import math
@@ -32,6 +34,13 @@ def _read_version():
 
 __version__ = _read_version()
 
+
+def utf8_console():
+    """UTF-8 output, like the C binary (otherwise cp1252 crashes on Windows when output is redirected)."""
+    for s in (sys.stdout, sys.stderr):
+        if hasattr(s, 'reconfigure'):
+            s.reconfigure(encoding='utf-8')
+
 BLEND_MODES = {
     0: 'Color', 1: 'Behind', 2: 'Erase', 3: 'Shade', 4: 'Light', 5: 'Colorize',
     6: 'Hue', 7: 'Add', 8: 'Sub', 9: 'Multiply', 10: 'Screen', 11: 'Replace',
@@ -41,18 +50,18 @@ BLEND_MODES = {
     28: 'Saturation',
 }
 
-# Comportements avant/après (LRHD : u16 @52 = avant, u16 @44 = après)
+# Pre/post behaviours (LRHD: u16 @52 = pre, u16 @44 = post)
 BEHAVIORS = {0: 'none', 1: 'repeat', 2: 'pingpong', 3: 'hold'}
-BEHAVIORS_FR = {'none': '-', 'repeat': 'répéter', 'pingpong': 'ping-pong', 'hold': 'tenir'}
+BEHAVIORS_SHORT = {'none': '-', 'repeat': 'repeat', 'pingpong': 'ping-pong', 'hold': 'hold'}
 
-# Types d'entrée de frame (premier u32 d'un bloc SRAW)
+# Frame entry types (first u32 of an SRAW chunk)
 FRAME_NEW, FRAME_HOLD, FRAME_BREAK, FRAME_EMPTY = 0x40, 6, 2, 5
 
 
-# ---------------------------------------------------------------- lecture bas niveau
+# ---------------------------------------------------------------- low-level reading
 
 def _chunks(d, start):
-    """Blocs façon IFF : tag ASCII 4 octets + taille u32 big-endian (+ octet de bourrage)."""
+    """IFF-style chunks: 4-byte ASCII tag + big-endian u32 size (+ padding byte)."""
     i = start
     while i + 8 <= len(d):
         tag = d[i:i + 4]
@@ -64,12 +73,12 @@ def _chunks(d, start):
 
 
 def _zchk_inner(body, full=False):
-    """Bloc ZCHK = un bloc interne compressé (zlib par blocs de 64 Ko).
-    body : tag interne (4) + taille interne (4) + 'czmp' + u32 taille totale
-           + u32 nombre de blocs, puis par bloc : u32 méthode (100 = zlib),
-           u32 taille brute, u32 taille compressée, données.
-    Le flux décompressé contient le bloc interne complet (tag + taille + contenu).
-    Avec full=False, ne décompresse que le début (assez pour lire le type de frame)."""
+    """ZCHK chunk = a compressed inner chunk (zlib, in 64 KB blocks).
+    body: inner tag (4) + inner size (4) + 'czmp' + u32 total size
+          + u32 number of blocks, then for each block: u32 method (100 = zlib),
+          u32 raw size, u32 compressed size, data.
+    The decompressed stream holds the complete inner chunk (tag + size + content).
+    With full=False, only the start is decompressed (enough to read the frame type)."""
     tag = body[:4].decode()
     nb = struct.unpack('>I', body[16:20])[0]
     i, out = 20, bytearray()
@@ -87,14 +96,14 @@ def _zchk_inner(body, full=False):
     return tag, bytes(out[8:])
 
 
-# Conteneur général : sections = GUID (16 octets) + taille u64 big-endian + contenu.
-# On les reconnaît par les 4 premiers octets du GUID.
+# Overall container: sections = GUID (16 bytes) + big-endian u64 size + content.
+# They are identified by the first 4 bytes of the GUID.
 SEC_ROOT, SEC_PROJECT_HDR, SEC_SHOT = '3384780e', '3385553a', '338631b2'
 SEC_SHOT_HDR, SEC_CLIP, SEC_CLIP_HDR, SEC_CLIP_BODY = '3388da98', '3389b846', '3387e34a', '33871154'
 
 
 def _sections(d, start, end):
-    """Itère les sections filles de [start, end) : (id, début contenu, fin contenu)."""
+    """Iterates over the child sections of [start, end): (id, content start, content end)."""
     i = start
     while i + 24 <= end:
         size = struct.unpack('>Q', d[i + 16:i + 24])[0]
@@ -109,7 +118,7 @@ def _find(d, start, end, sec_id):
 
 
 def _kv(d, start):
-    """Liste clé/valeur : u32 nombre de paires, puis (u16 longueur + UTF-16 BE) × 2."""
+    """Key/value list: u32 number of pairs, then (u16 length + UTF-16 BE) × 2."""
     count = struct.unpack('>I', d[start:start + 4])[0]
     i, out = start + 4, {}
     for _ in range(count):
@@ -128,7 +137,7 @@ def _header(d):
 
 
 def _ini_section(d, name):
-    """Lit une section texte « [name] » (clé=valeur) stockée en clair dans le fichier."""
+    """Reads a "[name]" text section (key=value) stored as plain text in the file."""
     m = re.search(rb'\[' + re.escape(name.encode()) + rb'\]\n((?:[^\[\n][^\n]*\n)*)', d)
     if not m:
         return {}
@@ -152,7 +161,7 @@ def _ini(body):
     return sections
 
 
-# ---------------------------------------------------------------- calques
+# ---------------------------------------------------------------- layers
 
 def _layers(d, start=0, end=None):
     out = []
@@ -164,12 +173,12 @@ def _layers(d, start=0, end=None):
                 if 'name' in cur:
                     break
                 cur['name'] = body.split(b'\0')[0].decode('cp1252', 'replace')
-            elif tag == 'LNAW':   # même nom, en UTF-8 : prioritaire
+            elif tag == 'LNAW':   # same name, in UTF-8: takes precedence
                 cur['name'] = body.split(b'\0')[0].decode('utf-8', 'replace')
-            elif tag in ('LRHD', 'LRSH'):   # LRSH : en-tête d'un calque CTG
+            elif tag in ('LRHD', 'LRSH'):   # LRSH: header of a CTG layer
                 cur['lrhd'] = body
                 cur['ctg'] = tag == 'LRSH'
-            elif tag == 'LRSR':             # CTG : début des images de remplissage calculé
+            elif tag == 'LRSR':             # CTG: start of the computed fill images
                 cur['result'] = []
                 target = cur['result']
             elif tag == 'DBOD':
@@ -190,10 +199,10 @@ def _layers(d, start=0, end=None):
 
 
 def _ctg_info(raw):
-    """Réglages d'un calque CTG (section LEXT) et présence du remplissage enregistré."""
+    """Settings of a CTG layer (LEXT section) and whether the fill is stored."""
     ext = raw['ext']
     src = ext.get('scribbles source pos', {})
-    sources = [int(v) + 1 for k, v in sorted(src.items()) if k.isdigit()]   # index de calque (base 1)
+    sources = [int(v) + 1 for k, v in sorted(src.items()) if k.isdigit()]   # layer index (1-based)
     cols = ext.get('scribblescolors', {})
     colors = [{'name': cols.get(f'color_{i}_name'), 'rgba': cols.get(f'color_{i}_color')}
               for i in range(int(cols.get('count', 0) or 0))]
@@ -213,12 +222,12 @@ def _layer_info(index, raw):
     start, end, count = struct.unpack('>3I', h[4:16])
     flags = struct.unpack('>I', h[28:32])[0]
     blend = struct.unpack('>I', h[60:64])[0]
-    pre = BEHAVIORS.get(struct.unpack('>H', h[52:54])[0], 'inconnu')
-    post = BEHAVIORS.get(struct.unpack('>H', h[44:46])[0], 'inconnu')
+    pre = BEHAVIORS.get(struct.unpack('>H', h[52:54])[0], 'unknown')
+    post = BEHAVIORS.get(struct.unpack('>H', h[44:46])[0], 'unknown')
     names = raw['ext'].get('images name', {})
 
     exposures = []
-    if count == 0:  # calque image : une image fixe de start à end
+    if count == 0:  # image layer: one still image from start to end
         exposures.append({'start': start, 'duration': end - start + 1})
     else:
         for k, kind in enumerate(raw['frames']):
@@ -242,7 +251,7 @@ def _layer_info(index, raw):
         'visible': not (flags & 0x01),
         'locked': bool(flags & 0x10),
         'density': round(h[19] / 255 * 100),
-        'blending': BLEND_MODES.get(blend, f'inconnu ({blend})'),
+        'blending': BLEND_MODES.get(blend, f'unknown ({blend})'),
         'pre_behavior': pre,
         'post_behavior': post,
         'exposures': exposures,
@@ -253,9 +262,9 @@ def _layer_info(index, raw):
 # ---------------------------------------------------------------- API
 
 def _camera(d, start, end):
-    """Caméra du clip (TVPaint 11) : section texte [cameradata] du clip.
-    Chaque point : centre (x, y) en pixels du projet, rotation en degrés,
-    zoom (1 = cadre caméra à sa taille nominale)."""
+    """Clip camera (TVPaint 11): the clip's [cameradata] text section.
+    Each point: centre (x, y) in project pixels, rotation in degrees,
+    zoom (1 = camera frame at its nominal size)."""
     m = re.compile(rb'\[cameradata\]\n((?:[^\[\n][^\n]*\n)*)').search(d, start, end)
     if not m:
         return None
@@ -271,31 +280,31 @@ def _camera(d, start, end):
     npp = int(kv.get('mprofile_prof_numpoint', 0) or 0)
     prof = [tuple(float(x) for x in kv[f'mprofile_prof_point{i}'].split())
             for i in range(npp) if f'mprofile_prof_point{i}' in kv]
-    ptype = {0: 'courbe', 1: 'lineaire', 2: 'polynomial'}.get(
-        int(kv.get('mprofile_prof_linear', 1) or 1), 'courbe')
+    ptype = {0: 'curve', 1: 'linear', 2: 'polynomial'}.get(
+        int(kv.get('mprofile_prof_linear', 1) or 1), 'curve')
     return {
         'points': points,
         'mode': int(kv.get('mmode', 0) or 0),
-        # flou : fraction de l'intervalle entre deux frames (0 = aucun) ;
-        # TVPaint moyenne le cadrage entre t et t + flou (fenêtre vers l'avant)
+        # blur: fraction of the interval between two frames (0 = none);
+        # TVPaint averages the framing between t and t + blur (forward window)
         'motion_blur': float(kv.get('mmotionblur', 0) or 0),
         'speed_profile': {'type': ptype, 'points': prof},
     }
 
 
 def profile_eval(profile, t):
-    """Profil de vitesse Temps -> Position (éditeur « Profil : Camera Temps/Position »).
-    lineaire   : segments droits entre les points
-    courbe     : Hermite cubique, tangentes de Catmull-Rom (pente entre les voisins),
-                 tangente nulle aux deux extrémités ; droite s'il n'y a que deux points
-    polynomial : polynôme de Lagrange passant par tous les points
-    Le résultat est borné à [0, 1]."""
+    """Time -> Position speed profile ("Profile: Camera Time/Position" editor).
+    linear     : straight segments between the points
+    curve      : cubic Hermite, Catmull-Rom tangents (slope between neighbours),
+                 zero tangent at both ends; a straight line if there are only two points
+    polynomial : Lagrange polynomial through every point
+    The result is clamped to [0, 1]."""
     pts = sorted(profile.get('points') or [(0.0, 0.0), (1.0, 1.0)])
     if len(pts) < 2:
         return t
     xs = [p[0] for p in pts]
     ys = [p[1] for p in pts]
-    kind = profile.get('type', 'lineaire')
+    kind = profile.get('type', 'linear')
     t = min(max(t, xs[0]), xs[-1])
     if kind == 'polynomial':
         v = 0.0
@@ -309,8 +318,8 @@ def profile_eval(profile, t):
     k = max(i for i in range(len(xs) - 1) if xs[i] <= t) if t < xs[-1] else len(xs) - 2
     h = xs[k + 1] - xs[k]
     s = (t - xs[k]) / h if h else 0.0
-    if kind == 'lineaire' or len(xs) == 2:
-        # une « courbe » à deux points seulement reste une droite (mesuré sur B1)
+    if kind == 'linear' or len(xs) == 2:
+        # a "curve" with only two points stays a straight line (measured on B1)
         return ys[k] + (ys[k + 1] - ys[k]) * s
     def slope(i):
         if i == 0 or i == len(xs) - 1:
@@ -324,9 +333,9 @@ def profile_eval(profile, t):
 
 
 def _camera_weights(points):
-    """Durées relatives des segments du chemin caméra (TVPaint 11, déduit du corpus) :
-    L_i = distance x/y du segment i (zoom et rotation ne comptent pas), n segments,
-    w_0 = L_0 et w_i = (n-1)·L_(i-1) + L_i."""
+    """Relative durations of the camera path segments (TVPaint 11, inferred from the corpus):
+    L_i = x/y distance of segment i (zoom and rotation do not count), n segments,
+    w_0 = L_0 and w_i = (n-1)·L_(i-1) + L_i."""
     n = len(points) - 1
     L = [math.hypot(points[i + 1]['x'] - points[i]['x'], points[i + 1]['y'] - points[i]['y'])
          for i in range(n)]
@@ -334,8 +343,8 @@ def _camera_weights(points):
 
 
 def camera_at(points, u):
-    """Cadrage interpolé à la position u ∈ [0, 1] du chemin (x, y, rotation, zoom).
-    Dans un segment, les quatre valeurs varient linéairement."""
+    """Framing interpolated at position u ∈ [0, 1] of the path (x, y, rotation, zoom).
+    Within a segment, the four values vary linearly."""
     if not points:
         return None
     if len(points) == 1 or u <= 0:
@@ -343,7 +352,7 @@ def camera_at(points, u):
     w = _camera_weights(points)
     total = sum(w)
     if total == 0:
-        # aucun déplacement x/y (zoom ou rotation seuls) : segments de durées égales
+        # no x/y movement (zoom or rotation only): segments of equal duration
         w = [1.0] * (len(points) - 1)
         total = float(len(w))
     t, acc = u * total, 0.0
@@ -357,18 +366,18 @@ def camera_at(points, u):
 
 
 def camera_track(points, nframes, profile=None):
-    """Cadrage de chaque frame. Le chemin est réparti sur nframes (étendue des
-    calques VISIBLES) : temps t = f / (nframes - 1), puis u = profil(t)
-    (profil de vitesse), puis cadrage = camera_at(points, u)."""
+    """Framing of each frame. The path is spread over nframes (extent of the
+    VISIBLE layers): time t = f / (nframes - 1), then u = profile(t)
+    (speed profile), then framing = camera_at(points, u)."""
     if not nframes:
         return []
-    prof = profile or {'type': 'lineaire', 'points': [(0.0, 0.0), (1.0, 1.0)]}
+    prof = profile or {'type': 'linear', 'points': [(0.0, 0.0), (1.0, 1.0)]}
     return [camera_at(points, profile_eval(prof, f / (nframes - 1) if nframes > 1 else 0.0))
             for f in range(nframes)]
 
 
 def _clips(d):
-    """Plans (shots) puis clips du projet. Repli : tout le fichier = un clip."""
+    """Shots, then clips of the project. Fallback: the whole file = one clip."""
     clips = []
     for ra, rb in _find(d, 0, len(d), SEC_ROOT):
         for sa, sb in _find(d, ra, rb, SEC_SHOT):
@@ -381,7 +390,7 @@ def _clips(d):
 
 
 def read_tvpp(path):
-    """Retourne un dict décrivant le projet, ses clips et leurs calques."""
+    """Returns a dict describing the project, its clips and their layers."""
     with open(path, 'rb') as f:
         d = f.read()
     hdr = _header(d)
@@ -391,7 +400,7 @@ def read_tvpp(path):
     for k, (ch, a, b) in enumerate(_clips(d)):
         layers = [_layer_info(i + 1, l) for i, l in enumerate(_layers(d, a, b))]
         frames = max((l['end'] for l in layers), default=-1) + 1
-        # la caméra (et le rendu) couvrent l'étendue des calques visibles seulement
+        # the camera (and the render) cover the extent of the visible layers only
         visible_frames = max((l['end'] for l in layers if l['visible']), default=-1) + 1
         cam = _camera(d, a, b)
         if cam is not None:
@@ -405,7 +414,7 @@ def read_tvpp(path):
             for wi in w:
                 acc += wi
                 target = acc / tot if tot else 0
-                # première frame où u = profil(f/(N-1)) atteint la position du point
+                # first frame where u = profile(f/(N-1)) reaches the point's position
                 arr.append(next((f for f in range(visible_frames)
                                  if profile_eval(cam['speed_profile'], f / max(1, visible_frames - 1))
                                  >= target - 1e-9), visible_frames - 1))
@@ -441,7 +450,7 @@ def read_tvpp(path):
     }
 
 
-# ---------------------------------------------------------------- affichage
+# ---------------------------------------------------------------- display
 
 def _timecode(frames, fps):
     if not fps:
@@ -452,28 +461,28 @@ def _timecode(frames, fps):
 
 def print_report(p):
     print(f"\n{p['file']}")
-    print(f"  Résolution   {p['width']} × {p['height']}  (pixel aspect {p['pixel_aspect']:g})")
-    print(f"  Sortie       {p['output']['width']} × {p['output']['height']}  (taille caméra)")
-    print(f"  Cadence      {p['fps']:g} i/s")
+    print(f"  Resolution   {p['width']} × {p['height']}  (pixel aspect {p['pixel_aspect']:g})")
+    print(f"  Output       {p['output']['width']} × {p['output']['height']}  (camera size)")
+    print(f"  Frame rate   {p['fps']:g} fps")
     if abs(p['output']['fps'] - p['fps']) > 1e-3:
-        print(f"  ⚠ Cadence caméra {p['output']['fps']:g} i/s ≠ projet : TVPaint rééchantillonne au rendu"
-              f" (frames dupliquées ou sautées)")
+        print(f"  ⚠ Camera frame rate {p['output']['fps']:g} fps ≠ project: TVPaint resamples at render"
+              f" (duplicated or skipped frames)")
     print(f"  TVPaint      {p['tvpaint']}")
-    print(f"  Modifié le   {p['modified']}  par {p['author']}")
+    print(f"  Modified     {p['modified']}  by {p['author']}")
     print(f"  Clips        {len(p['clips'])}")
     for c in p['clips']:
         marks = ''
         if c['mark_in'] is not None or c['mark_out'] is not None:
-            marks = f"   marques {c['mark_in'] if c['mark_in'] is not None else '-'}" \
+            marks = f"   marks {c['mark_in'] if c['mark_in'] is not None else '-'}" \
                     f" → {c['mark_out'] if c['mark_out'] is not None else '-'}"
-        hidden = '  (masqué)' if c['hidden'] else ''
-        print(f"\n  ▸ Clip {c['index']} « {c['name']} »{hidden} — {c['frames']} "
+        hidden = '  (hidden)' if c['hidden'] else ''
+        print(f"\n  ▸ Clip {c['index']} \"{c['name']}\"{hidden} — {c['frames']} "
               f"frame{'s' if c['frames'] > 1 else ''} ({_timecode(c['frames'], p['fps'])}){marks}")
-        cols = ['#', 'Nom', 'Type', 'Frames', 'Avant', 'Après', 'Dessins', 'Visible', 'Verrou', 'Opacité', 'Mode']
+        cols = ['#', 'Name', 'Type', 'Frames', 'Pre', 'Post', 'Drawings', 'Visible', 'Locked', 'Opacity', 'Mode']
         rows = [[str(l['index']), l['name'], l['type'], f"{l['start']}-{l['end']}",
-                 BEHAVIORS_FR.get(l['pre_behavior'], l['pre_behavior']),
-                 BEHAVIORS_FR.get(l['post_behavior'], l['post_behavior']), str(l['drawings']),
-                 'oui' if l['visible'] else 'non', 'oui' if l['locked'] else '-',
+                 BEHAVIORS_SHORT.get(l['pre_behavior'], l['pre_behavior']),
+                 BEHAVIORS_SHORT.get(l['post_behavior'], l['post_behavior']), str(l['drawings']),
+                 'yes' if l['visible'] else 'no', 'yes' if l['locked'] else '-',
                  f"{l['density']} %", l['blending']] for l in c['layers']]
         widths = [max([len(col)] + [len(r[i]) for r in rows]) for i, col in enumerate(cols)]
         print('    ' + '  '.join(col.ljust(w) for col, w in zip(cols, widths)))
@@ -484,31 +493,32 @@ def print_report(p):
         if cam and cam['points']:
             pts = cam['points']
             moving = any((q['x'], q['y'], q['rotation'], q['zoom']) != (pts[0]['x'], pts[0]['y'], pts[0]['rotation'], pts[0]['zoom']) for q in pts)
-            print(f"    Caméra : {len(pts)} point(s), {'en mouvement' if moving else 'fixe'}"
-                  f"{', flou de mouvement ' + format(cam['motion_blur'], 'g') if cam['motion_blur'] else ''}"
-                  f"{', profil de vitesse ' + cam['speed_profile']['type'] if len(cam['speed_profile']['points']) > 2 or cam['speed_profile']['type'] != 'lineaire' else ''}")
+            print(f"    Camera: {len(pts)} point(s), {'moving' if moving else 'still'}"
+                  f"{', motion blur ' + format(cam['motion_blur'], 'g') if cam['motion_blur'] else ''}"
+                  f"{', speed profile ' + cam['speed_profile']['type'] if len(cam['speed_profile']['points']) > 2 or cam['speed_profile']['type'] != 'linear' else ''}")
             if moving:
-                print(f"      réparti sur {cam['frames']} frames (étendue des calques visibles)")
+                print(f"      spread over {cam['frames']} frames (extent of the visible layers)")
             for k, q in enumerate(pts):
                 arr = cam.get('arrival_frames')
-                when = f"  → atteint frame {arr[k]}" if moving and arr else ''
-                print(f"      point {k} : centre ({q['x']:g}, {q['y']:g})  zoom {q['zoom']:g}  rotation {q['rotation']:g}°{when}")
+                when = f"  → reached at frame {arr[k]}" if moving and arr else ''
+                print(f"      point {k}: centre ({q['x']:g}, {q['y']:g})  zoom {q['zoom']:g}  rotation {q['rotation']:g}°{when}")
         names = {l['index']: l['name'] for l in c['layers']}
         for l in c['layers']:
             if 'ctg' not in l:
                 continue
             g = l['ctg']
-            src = ', '.join(f"{i} « {names.get(i, '?')} »" for i in g['sources']) or 'aucune'
-            res = 'enregistré' if g['result_stored'] else \
-                  ('partiel' if g['result_frames'] else 'absent (à recalculer)')
-            print(f"    CTG {l['index']} « {l['name']} » : source(s) {src} — {len(g['colors'])} couleur(s)"
-                  f"{', ' + str(g['textures']) + ' texture(s)' if g['textures'] else ''} — remplissage {res}")
+            src = ', '.join(f"{i} \"{names.get(i, '?')}\"" for i in g['sources']) or 'none'
+            res = 'stored' if g['result_stored'] else \
+                  ('partial' if g['result_frames'] else 'missing (needs recomputing)')
+            print(f"    CTG {l['index']} \"{l['name']}\": source(s) {src} — {len(g['colors'])} colour(s)"
+                  f"{', ' + str(g['textures']) + ' texture(s)' if g['textures'] else ''} — fill {res}")
     print()
 
 
 def main(argv):
+    utf8_console()
     if '--version' in argv:
-        print('tvpp_info', __version__)
+        print('opentvp_info', __version__)
         return 0
     as_json = '--json' in argv
     paths = [a for a in argv if not a.startswith('--')]
@@ -519,8 +529,8 @@ def main(argv):
     for path in paths:
         try:
             results.append(read_tvpp(path))
-        except Exception as e:  # fichier illisible : on continue avec les autres
-            print(f"{path} : lecture impossible ({e})", file=sys.stderr)
+        except Exception as e:  # unreadable file: carry on with the others
+            print(f"{path}: cannot read ({e})", file=sys.stderr)
             code = 2
     if as_json:
         print(json.dumps(results[0] if len(results) == 1 else results, indent=2, ensure_ascii=False))

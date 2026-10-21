@@ -1,29 +1,29 @@
-# tvpp — lecture et rendu de fichiers TVPaint sans TVPaint
+# opentvp — reading and rendering TVPaint files without TVPaint
 
-Projet des Fées Spéciales : lire les `.tvpp` (TVPaint Animation 11) sans TVPaint, pour rendre et exporter les plans sur un serveur, sans interface. Le format a été établi par rétro-ingénierie : **lire `docs/FORMAT.md` avant de toucher au décodage ou au rendu.**
+A Les Fées Spéciales project: read `.tvpp` files (TVPaint Animation 11) without TVPaint, to render and export shots on a headless server. The format was reverse-engineered: **read `docs/FORMAT.md` before touching decoding or rendering.**
 
-## Organisation
+## Layout
 
-- `c/` : l'outil livré (`tvpp`, `tvpp.exe`, `tvpp-macos`). Un seul fichier source, `c/tvpp.c`, plus `c/third_party/libdeflate` (MIT). Compilation : `c/build.sh` (natif) ou `c/build.sh all` (Windows, Mac universel, Linux statique, via `pip install ziglang`).
-- `python/` : implémentation de référence, plus lente mais facile à modifier. `tvpp_info.py` (structure, aucune dépendance), `tvpp_render.py` (rendu et export par calque, numpy + Pillow), `proto.py` (décodage des pixels). Les nouvelles fonctions se prototypent ici, puis se portent en C.
-- `corpus/` : `george/` contient les scripts qui génèrent le corpus dans TVPaint ; `data/` contient les fichiers produits, avec la vérité terrain TVPaint (`*_gt.csv`, `*_gt.layers/`, `render_*.png`). `camera_refs.json` associe chaque fichier caméra à ses rendus.
-- `tests/` : `run_all.sh` lance tout. `check_layers.py` compare l'export par calque à la vérité terrain (doit rester à 0 échec). `check_camera.py` compare les rendus caméra à `baseline_camera.json` (pas de régression).
-- `docs/` : `FORMAT.md` (spécification), `UTILISATION.md` (mode d'emploi de l'exe), `EXPORT_CALQUES.md` (format du JSON).
+- `c/`: the shipped tool (`opentvp`, `opentvp.exe`, `opentvp-macos`). A single source file, `c/opentvp.c`, plus `c/third_party/libdeflate` (MIT). Build: `c/build.sh` (native) or `c/build.sh all` (Windows, universal Mac, static Linux, via `pip install ziglang`).
+- `python/`: reference implementation, slower but easy to change. `opentvp_info.py` (structure, no dependencies), `opentvp_render.py` (rendering and per-layer export, numpy + Pillow), `proto.py` (pixel decoding). New features are prototyped here, then ported to C.
+- `corpus/`: `george/` holds the scripts that generate the corpus in TVPaint; `data/` holds the resulting files, with TVPaint ground truth (`*_gt.csv`, `*_gt.layers/`, `render_*.png`). `camera_refs.json` maps each camera file to its renders.
+- `tests/`: `run_all.sh` runs everything. `check_layers.py` compares the per-layer export with ground truth (must stay at 0 failures). `check_camera.py` compares camera renders with `baseline_camera.json` (no regression).
+- `docs/`: `FORMAT.md` (specification), `USAGE.md` (executable user guide), `LAYER_EXPORT.md` (JSON format).
 
-## Règles
+## Rules
 
-- Les sorties du C et du Python doivent rester identiques au pixel près (images et JSON). Toute évolution se fait des deux côtés, ou le README dit lequel est en avance.
-- Les fichiers de production (plans sq…_sh…) ne vont jamais dans le dépôt. On les teste avec `tests/compare_render.py plan.tvpp dossier_refs`.
-- Scripts George : le dossier de sortie passe toujours par une variable `base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"` en tête, jamais en dur. Respecter les pièges listés à la fin de `docs/FORMAT.md`.
-- L'utilisateur compte les frames depuis 1 dans la timeline TVPaint ; les outils comptent depuis 0, comme les paramètres du projet. Le préciser à chaque fois qu'on parle d'un numéro de frame.
-- Langue du projet : français (messages, docs, commentaires).
-- Version : fichier `VERSION` à la racine, injecté dans le binaire et lu par le Python. Une release = un tag `vX.Y.Z` ; la CI compile et publie les binaires.
+- C and Python outputs must stay pixel-identical (images and JSON) and print the same messages. Every change is made on both sides, or the README says which one is ahead.
+- Production files (sq…_sh… shots) never go into the repository. Test them with `tests/compare_render.py shot.tvpp refs_folder`.
+- George scripts: the output folder always goes through a `base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"` variable at the top, never hard-coded. Mind the pitfalls listed at the end of `docs/FORMAT.md`.
+- The user counts frames from 1 in the TVPaint timeline; the tools count from 0, like the project settings. Say which one every time a frame number comes up.
+- Project language: English (messages, docs, comments). Corpus folder names and George scripts stay in French. The user may write in French.
+- Version: `VERSION` file at the root, injected into the binary and read by the Python. A release = a `vX.Y.Z` tag; CI builds and publishes the binaries.
 
-## Pistes ouvertes
+## Open leads
 
-- Rééchantillonnage quand la cadence caméra ≠ la cadence projet (cause des écarts dans `baseline_camera.json`).
-- Écart résiduel du modèle caméra (≤ 0,7 % du mouvement).
-- Validation des modes de fusion autres que Color ; modes non gérés (Shade, Light, Hue, Colorize, SoftLight…).
-- TVPaint 12 : regénérer le corpus avec les mêmes scripts et comparer.
-- Calques son, référence, dossiers : non étudiés.
-- Import After Effects (script ExtendScript lisant le JSON d'exposition).
+- Resampling when the camera frame rate ≠ the project frame rate (cause of the errors in `baseline_camera.json`).
+- Residual camera model error (≤ 0.7 % of the movement).
+- Validation of blending modes other than Color; unsupported modes (Shade, Light, Hue, Colorize, SoftLight…).
+- TVPaint 12: regenerate the corpus with the same scripts and compare.
+- Sound, reference and folder layers: not studied.
+- After Effects import (ExtendScript reading the exposure JSON).

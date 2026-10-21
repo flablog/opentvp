@@ -1,29 +1,31 @@
 # Corpus
 
-Ce sont des fichiers `.tvpp` minuscules, générés dans TVPaint 11.7.6 par les scripts de `george/`. Chaque fichier n'isole qu'une seule propriété du format. À côté de chaque fichier se trouve ce que TVPaint en exporte lui-même :
+Tiny `.tvpp` files, generated in TVPaint 11.7.6 by the scripts in `george/`. Each file isolates a single property of the format. Next to each file is what TVPaint itself exports from it:
 
-- `*_gt.csv` et `*_gt.layers/` : `tv_ClipSaveStructure` (une image PNG par instance et par calque) ;
-- `render_*_NNNN.png` : rendu à travers la caméra (`tv_ProjectSaveSequence … "camera"`).
+- `*_gt.csv` and `*_gt.layers/`: `tv_ClipSaveStructure` (one PNG per instance and per layer);
+- `render_*_NNNN.png`: render through the camera (`tv_ProjectSaveSequence … "camera"`).
 
-| dossier | contenu | script |
+Folder names are in French, as generated; the table gives their content.
+
+| folder | content | script |
 |---|---|---|
-| `01_bases` | projet vide, carrés, résolution, fps, renommage, opacité, fusion | `make_tvpp_corpus.grg` |
-| `02_images_calques` | plusieurs images, modifications d'un pixel, tailles non multiples de 64, calques masqués | `make_tvpp_corpus2.grg` |
-| `03_tuiles_fusion` | tuiles de bord, tuiles identiques, tous les modes de fusion | `make_tvpp_corpus3.grg` |
-| `04_expositions` | tenues, deux par deux, instances vides, décalage de calque, noms d'instance | `make_tvpp_corpus4.grg` |
-| `05_comportements` | avant/après : aucun, répéter, ping-pong, tenir | `make_tvpp_corpus5.grg` |
-| `06_plusieurs_clips` | deux clips dans un projet | (manuel) |
-| `07_camera_base` | translation, zoom, rotation, un point, points inégaux | `make_tvpp_cam.grg` |
-| `08_camera_points_doubles` | points répétés (tenues de caméra) | `make_tvpp_cam2.grg` |
-| `09_camera_trajets` | trajets à 3–5 points, marques | `make_tvpp_cam3.grg` |
-| `10_camera_duree_visible` | durée = calques visibles (masqués et marques ignorés) | `make_tvpp_cam5.grg` |
-| `11_camera_cadence` | durées de 10 à 120 frames, projet à 24 ou 25 i/s | `make_tvpp_cam6.grg` |
-| `12_camera_profils_flou` | profils de vitesse (linéaire, courbe, polynômial) et flou de mouvement | `make_tvpp_cam7_base.grg` + réglages à la main + `make_tvpp_cam7_render.grg` |
+| `01_bases` | empty project, squares, resolution, fps, renaming, opacity, blending | `make_tvpp_corpus.grg` |
+| `02_images_calques` | several images, one-pixel changes, sizes that are not multiples of 64, hidden layers | `make_tvpp_corpus2.grg` |
+| `03_tuiles_fusion` | edge tiles, identical tiles, every blending mode | `make_tvpp_corpus3.grg` |
+| `04_expositions` | holds, on twos, empty instances, layer offset, instance names | `make_tvpp_corpus4.grg` |
+| `05_comportements` | pre/post: none, repeat, ping-pong, hold | `make_tvpp_corpus5.grg` |
+| `06_plusieurs_clips` | two clips in one project | (manual) |
+| `07_camera_base` | translation, zoom, rotation, single point, uneven points | `make_tvpp_cam.grg` |
+| `08_camera_points_doubles` | repeated points (camera holds) | `make_tvpp_cam2.grg` |
+| `09_camera_trajets` | 3–5 point paths, marks | `make_tvpp_cam3.grg` |
+| `10_camera_duree_visible` | duration = visible layers (hidden layers and marks ignored) | `make_tvpp_cam5.grg` |
+| `11_camera_cadence` | durations from 10 to 120 frames, project at 24 or 25 fps | `make_tvpp_cam6.grg` |
+| `12_camera_profils_flou` | speed profiles (linear, curve, polynomial) and motion blur | `make_tvpp_cam7_base.grg` + manual settings + `make_tvpp_cam7_render.grg` |
 
-Autres scripts :
+Other scripts:
 
-- `make_tvpp_cam4.grg` (S2–S4) échantillonne `tv_CameraInterpolation` dans des chaînes du projet. C'est ce qui a servi à établir la loi de répartition du temps ; ses résultats ne sont pas dans `data/`.
-- `make_tvpp_ctg_base.grg` et `make_tvpp_ctg_gt.grg` (C01–C06) forment un corpus CTG manuel. Il n'a pas été produit, parce qu'un plan de production a suffi ; il est à reprendre pour un corpus CTG public.
-- `render_reference.grg` rend un plan de production à travers la caméra, pour `tests/compare_render.py`.
+- `make_tvpp_cam4.grg` (S2–S4) samples `tv_CameraInterpolation` into project strings. This is what established the time distribution law; its results are not in `data/`.
+- `make_tvpp_ctg_base.grg` and `make_tvpp_ctg_gt.grg` (C01–C06) form a manual CTG corpus. It was not produced, because a production shot was enough; it should be picked up again for a public CTG corpus.
+- `render_reference.grg` renders a production shot through the camera, for `tests/compare_render.py`.
 
-Pour regénérer le corpus, par exemple avec TVPaint 12 : ouvrir chaque script, régler `base` sur un dossier vide, le lancer dans TVPaint, puis comparer avec `python tests/check_layers.py dossier` et `tests/check_camera.py`.
+To regenerate the corpus, for instance with TVPaint 12: open each script, set `base` to an empty folder, run it in TVPaint, then compare with `python tests/check_layers.py folder` and `tests/check_camera.py`.

@@ -2,8 +2,8 @@
 c/build/
 dist/
 *.exe
-tvpp-linux
-tvpp-macos
+opentvp-linux
+opentvp-macos
 gmon.out
 # python
 __pycache__/

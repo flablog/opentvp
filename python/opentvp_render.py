@@ -1,42 +1,44 @@
 #!/usr/bin/env python3
-"""tvpp_render — rendu composé d'un clip TVPaint (.tvpp) sans TVPaint.
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Les Fées Spéciales
+"""opentvp_render — composited render of a TVPaint clip (.tvpp) without TVPaint.
 
-Usage :
-    python tvpp_render.py plan.tvpp dossier_sortie [options]
+Usage:
+    python opentvp_render.py shot.tvpp out_folder [options]
 
-Options :
-    --clip N            clip à rendre (1 par défaut)
-    --frames A-B        plage de frames (par défaut : marques in/out, sinon tout
-                        le contenu visible)
-    --bg MODE           fond : projet (défaut) | transparent | #RRGGBB
-    --scale S           facteur d'échelle de la sortie (ex. 0.5 pour une preview)
-    --blur-samples N    nombre d'échantillons pour le flou de mouvement (8)
-    --prefix NOM        préfixe des images (défaut : nom du clip)
+Options:
+    --clip N            clip to render (1 by default)
+    --frames A-B        frame range, from 0 (default: in/out marks, otherwise all
+                        visible content)
+    --bg MODE           background: project (default) | transparent | #RRGGBB
+    --scale S           output scale factor (e.g. 0.5 for a preview)
+    --blur-samples N    number of motion blur samples (8)
+    --prefix NAME       image prefix (default: clip name)
 
-Export calque par calque (voir EXPORT_CALQUES.md) :
-    --layers [LISTE]    exporte chaque calque dans son propre dossier : all (défaut,
-                        calques visibles) ou « nom,nom,3 » (numéros de tvpp_info)
-    --keyframes         une image par dessin + JSON d'exposition (sinon : toutes
-                        les frames, tenues comprises)
-    --camera            (toutes les frames) calques cadrés par la caméra
-    --include-hidden    inclut les calques masqués avec --layers all
-    --skip-empty        n'écrit pas d'image transparente quand le calque est vide
-    --jobs N            calques en parallèle (Linux/Mac)
-    --png-level N       compression PNG 0-9 (3)
-    --json NOM          nom du fichier JSON
+Layer-by-layer export (see LAYER_EXPORT.md):
+    --layers [LIST]     exports each layer to its own folder: all (default,
+                        visible layers) or "name,name,3" (numbers from opentvp_info)
+    --keyframes         one image per drawing + exposure JSON (otherwise: every
+                        frame, holds included)
+    --camera            (every frame) layers framed by the camera
+    --include-hidden    includes hidden layers with --layers all
+    --skip-empty        writes no transparent image when the layer is empty
+    --jobs N            layers in parallel (Linux/Mac)
+    --png-level N       PNG compression 0-9 (3)
+    --json NAME         JSON file name
 
-Dépendances : Python 3.8+, numpy, Pillow.
-Modules du même dossier : tvpp_info.py (structure, caméra), proto.py (pixels).
+Dependencies: Python 3.8+, numpy, Pillow.
+Modules from the same folder: opentvp_info.py (structure, camera), proto.py (pixels).
 
-Ce que fait le rendu (TVPaint 11.7, établi sur corpus) :
-  * calques visibles, du bas vers le haut, avec leur opacité ;
-  * tenues, comportements avant/après (répéter, ping-pong, tenir) ;
-  * calques CTG : remplissage enregistré par TVPaint ;
-  * caméra : taille de sortie, position, zoom, rotation, profil de vitesse,
-    flou de mouvement ;
-  * modes de fusion : Color (normal) validé ; Multiply, Screen, Add, Overlay,
-    Darken, Lighten, Difference, Behind, Erase implémentés mais pas encore
-    validés contre TVPaint ; les autres modes sont rendus en normal (avertissement).
+What the render does (TVPaint 11.7, established on the corpus):
+  * visible layers, bottom to top, with their opacity;
+  * holds, pre/post behaviours (repeat, ping-pong, hold);
+  * CTG layers: fill stored by TVPaint;
+  * camera: output size, position, zoom, rotation, speed profile,
+    motion blur;
+  * blending modes: Color (normal) validated; Multiply, Screen, Add, Overlay,
+    Darken, Lighten, Difference, Behind, Erase implemented but not yet
+    validated against TVPaint; other modes are rendered as normal (warning).
 """
 import argparse
 import json
@@ -51,15 +53,15 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import tvpp_info as ti                                     # noqa: E402
+import opentvp_info as ti                                     # noqa: E402
 from proto import (chunks, zchk_unwrap, unpackbits_bgra,   # noqa: E402
                    _decode_chain, frame_sources)
 
 
-# ---------------------------------------------------------------- lecture des pixels
+# ---------------------------------------------------------------- reading pixels
 
 def raw_layers(d, start, end):
-    """Calques bruts (blocs de pixels) entre start et end, dans l'ordre du fichier."""
+    """Raw layers (pixel chunks) between start and end, in file order."""
     out = []
     for m in re.compile(rb'LNAM').finditer(d, start, end):
         cur = {}
@@ -87,11 +89,11 @@ def raw_layers(d, start, end):
 
 
 class LayerImages:
-    """Accès aux images d'un calque, décodées à la demande.
-    Les images suivantes dépendent des précédentes (tuiles de référence) :
-    on avance dans la chaîne en ne gardant que l'image courante en mémoire,
-    plus les images réutilisées plus loin par une entrée de type 2.
-    Un retour en arrière (ping-pong, répéter…) relance la chaîne depuis le début."""
+    """Access to a layer's images, decoded on demand.
+    Each image depends on the previous ones (reference tiles): we walk the
+    chain keeping only the current image in memory, plus the images reused
+    later by a type 2 entry.
+    Going backwards (ping-pong, repeat…) replays the chain from the start."""
 
     def __init__(self, raw, w, h):
         self.w, self.h = w, h
@@ -102,7 +104,7 @@ class LayerImages:
         else:
             self.first = raw['dbod'][0][1]
             self.seq = raw.get('sraw', [])
-        # entrée de la frame k : seq[k - 1] si DBOD, seq[k] sinon
+        # entry for frame k: seq[k - 1] if there is a DBOD, seq[k] otherwise
         self.off = -1 if self.first is not None else 0
         self.keep = set()
         for _, body in self.seq:
@@ -112,7 +114,7 @@ class LayerImages:
         self.idx, self.img = -1, None
 
     def _step(self, k):
-        """Image de la frame k à partir de l'image de la frame k-1 (self.img)."""
+        """Image of frame k from the image of frame k-1 (self.img)."""
         j = k + self.off
         if j < 0:
             return
@@ -153,19 +155,19 @@ class LayerImages:
         return self.img
 
 
-# ---------------------------------------------------------------- caméra
+# ---------------------------------------------------------------- camera
 
 def camera_affine(cam_pt, proj_w, proj_h, out_w, out_h, scale):
-    """Coefficients PIL (sortie -> projet) pour un cadrage (x, y, rotation, zoom).
-    Relation (coordonnées continues, y vers le bas, angle en degrés) :
-        sortie - centre_sortie = R(+rotation) · (projet - centre_caméra) / zoom
+    """PIL coefficients (output -> project) for a framing (x, y, rotation, zoom).
+    Relation (continuous coordinates, y down, angle in degrees):
+        output - output_centre = R(+rotation) · (project - camera_centre) / zoom
     """
     cx, cy = cam_pt['x'], cam_pt['y']
     z = cam_pt['zoom'] / scale
     th = np.radians(cam_pt['rotation'])
     c, s = np.cos(th), np.sin(th)
     ox, oy = out_w / 2.0, out_h / 2.0
-    # projet = z · R(-θ) · (sortie - O) + C
+    # project = z · R(-θ) · (output - O) + C
     a, b = z * c, z * s
     d_, e = -z * s, z * c
     return (a, b, cx - a * ox - b * oy,
@@ -176,10 +178,10 @@ def default_camera(pw, ph):
     return {'x': pw / 2.0, 'y': ph / 2.0, 'rotation': 0.0, 'zoom': 1.0}
 
 
-# ---------------------------------------------------------------- fusion
+# ---------------------------------------------------------------- blending
 
 def blend(dst, src, mode):
-    """dst, src : float32 prémultipliés (H, W, 4) RGBA. Renvoie le résultat."""
+    """dst, src: premultiplied float32 (H, W, 4) RGBA. Returns the result."""
     sa = src[..., 3:4]
     da = dst[..., 3:4]
     if mode in ('Color', 'Normal', None):
@@ -188,7 +190,7 @@ def blend(dst, src, mode):
         return dst + src * (1 - da)
     if mode == 'Erase':
         return dst * (1 - sa)
-    # modes séparables (formules W3C), sur couleurs non prémultipliées
+    # separable modes (W3C formulas), on non-premultiplied colours
     eps = 1e-6
     Cs = np.where(sa > eps, src[..., :3] / np.maximum(sa, eps), 0)
     Cb = np.where(da > eps, dst[..., :3] / np.maximum(da, eps), 0)
@@ -217,7 +219,7 @@ SUPPORTED = {'Color', 'Behind', 'Erase', 'Multiply', 'Screen', 'Add',
              'Darken', 'Lighten', 'Difference', 'Overlay'}
 
 
-# ---------------------------------------------------------------- rendu
+# ---------------------------------------------------------------- rendering
 
 class ClipRenderer:
     def __init__(self, path, clip_index=1, scale=1.0, blur_samples=8):
@@ -239,7 +241,7 @@ class ClipRenderer:
             if not meta['visible']:
                 continue
             if meta['blending'] not in SUPPORTED:
-                print(f"  ⚠ calque « {meta['name']} » : mode {meta['blending']} non géré, rendu en normal",
+                print(f"  ⚠ layer \"{meta['name']}\": unsupported mode {meta['blending']}, rendered as normal",
                       file=sys.stderr)
             self.layers.append({
                 'meta': meta,
@@ -252,7 +254,7 @@ class ClipRenderer:
         self.cam_profile = cam['speed_profile'] if cam else None
         self.blur = cam['motion_blur'] if cam else 0.0
 
-    # cadrage à l'instant t (0..1)
+    # framing at time t (0..1)
     def camera_at_t(self, t):
         if not self.cam_points:
             return default_camera(self.pw, self.ph)
@@ -269,8 +271,8 @@ class ClipRenderer:
         return layer['images'].get(k)
 
     def render(self, f, u_override=None):
-        """Image composée (float32 prémultipliée RGBA, taille de sortie) de la frame f."""
-        # instants échantillonnés pour la caméra (flou de mouvement vers l'avant)
+        """Composited image (premultiplied float32 RGBA, output size) of frame f."""
+        # times sampled for the camera (forward motion blur)
         n = max(1, self.N - 1)
         t0 = f / n
         if u_override is not None:
@@ -280,7 +282,7 @@ class ClipRenderer:
             cams = [self.camera_at_t(t) for t in ts]
         else:
             cams = [self.camera_at_t(t0)]
-        # images des calques à cette frame (bas -> haut)
+        # layer images at this frame (bottom -> top)
         stack = []
         for layer in reversed(self.layers):
             raw = self._layer_frame(layer, f)
@@ -292,7 +294,7 @@ class ClipRenderer:
             self._canvas = Image.new('L', (self.pw, self.ph), 255)
         for cam in cams:
             coeffs = camera_affine(cam, self.pw, self.ph, self.ow, self.oh, self.scale)
-            # part de la sortie couverte par la feuille du projet (hors feuille : noir)
+            # share of the output covered by the project canvas (outside the canvas: black)
             cover += np.asarray(self._canvas.transform((self.ow, self.oh), Image.AFFINE, coeffs,
                                                        resample=Image.BILINEAR), np.float32)[..., None] / 255.0
             out = np.zeros((self.oh, self.ow, 4), np.float32)
@@ -316,14 +318,14 @@ class ClipRenderer:
         c1 = self.d[i + 8:i + 11]
         c2 = self.d[j + 8:j + 11]
         if c1 != c2:
-            print("  ⚠ fond du projet en deux couleurs (damier probable) : rendu sur la première couleur",
+            print("  ⚠ two-colour project background (probably a checkerboard): rendered on the first one",
                   file=sys.stderr)
         return tuple(v / 255.0 for v in c1)
 
 
 def to_image(img, bg, cover=None):
-    """cover : part de chaque pixel de sortie couverte par la feuille du projet ;
-    le fond du projet n'est posé que sur la feuille, le reste est noir (comme TVPaint)."""
+    """cover: share of each output pixel covered by the project canvas;
+    the project background is only laid on the canvas, the rest is black (like TVPaint)."""
     if bg is None:
         a = img[..., 3:4]
         rgb = np.where(a > 1e-6, img[..., :3] / np.maximum(a, 1e-6), 0)
@@ -334,17 +336,17 @@ def to_image(img, bg, cover=None):
     return Image.fromarray((np.clip(rgb, 0, 1) * 255 + 0.5).astype(np.uint8), 'RGB')
 
 
-# ---------------------------------------------------------------- export par calque
+# ---------------------------------------------------------------- per-layer export
 
 def safe_name(s):
-    return re.sub(r'[^\w.-]+', '_', s).strip('_') or 'calque'
+    return re.sub(r'[^\w.-]+', '_', s).strip('_') or 'layer'
 
 
 def drawing_ids(li, count):
-    """Identité du dessin affiché à chaque frame du calque (0..count-1).
-    Une nouvelle image (0x40, ou DBOD) crée un dessin, numéroté par la frame du
-    calque où il apparaît ; une tenue (6) prolonge le précédent ; une
-    référence (2) reprend le dessin d'une autre frame ; 5 = instance vide (None)."""
+    """Identity of the drawing shown at each layer frame (0..count-1).
+    A new image (0x40, or DBOD) creates a drawing, numbered after the layer
+    frame where it appears; a hold (6) extends the previous one; a
+    reference (2) reuses the drawing of another frame; 5 = empty instance (None)."""
     ids = []
     for k in range(max(count, 1)):
         if k == 0 and li.first is not None:
@@ -371,7 +373,7 @@ def drawing_ids(li, count):
 
 
 def unpremultiply(px):
-    """(H, W, 4) uint8 RGBA prémultiplié -> alpha droit, arrondi comme l'export TVPaint."""
+    """(H, W, 4) uint8 premultiplied RGBA -> straight alpha, rounded like TVPaint's export."""
     out = np.array(px, copy=True, order="C")
     flat = out.reshape(-1, 4)
     al = flat[:, 3]
@@ -384,13 +386,13 @@ def unpremultiply(px):
 
 
 def raw_to_image(raw, w, h):
-    """BGRA prémultiplié -> image PIL RGBA (alpha droit), prête pour un PNG."""
+    """Premultiplied BGRA -> PIL RGBA image (straight alpha), ready for a PNG."""
     px = np.frombuffer(raw, np.uint8).reshape(h, w, 4)[..., [2, 1, 0, 3]]
     return Image.fromarray(unpremultiply(px), 'RGBA')
 
 
 def parse_layer_selection(spec, layers):
-    """'all' ou liste « nom,nom,3 » (numéros = ordre de tvpp_info, 1 = en haut)."""
+    """'all' or a "name,name,3" list (numbers = opentvp_info order, 1 = top)."""
     if spec in (None, '', 'all', 'tous'):
         return list(range(len(layers)))
     out = []
@@ -401,7 +403,7 @@ def parse_layer_selection(spec, layers):
         hits = [i for i, l in enumerate(layers) if l['name'] == tok] or \
                [i for i, l in enumerate(layers) if l['name'].lower() == tok.lower()]
         if not hits:
-            raise SystemExit(f"calque introuvable : {tok!r} (voir tvpp_info.py pour la liste)")
+            raise SystemExit(f"layer not found: {tok!r} (see opentvp_info.py for the list)")
         out.extend(hits)
     return sorted(set(out))
 
@@ -414,7 +416,7 @@ def _run_layer_job(i):
 
 
 def export_layers(a):
-    """Export calque par calque : dessins seuls (+ JSON d'exposition) ou toutes les frames."""
+    """Layer-by-layer export: drawings only (+ exposure JSON) or every frame."""
     t_start = time.time()
     with open(a.tvpp, 'rb') as f:
         d = f.read()
@@ -429,7 +431,7 @@ def export_layers(a):
         sel = [i for i in sel if metas[i]['visible']]
     total = max(clip['frames'], 1)
 
-    # plage : --frames, sinon marques, sinon tout le clip
+    # range: --frames, otherwise marks, otherwise the whole clip
     if a.frames:
         f0, f1 = (int(x) for x in (a.frames.split('-') + a.frames.split('-'))[:2])
     elif clip['mark_in'] is not None or clip['mark_out'] is not None:
@@ -439,12 +441,12 @@ def export_layers(a):
         f0, f1 = 0, total - 1
     frames = range(f0, f1 + 1)
 
-    # caméra (toujours décrite dans le JSON ; appliquée seulement avec --camera)
+    # camera (always described in the JSON; applied only with --camera)
     renderer = None
     if a.camera:
         if a.keyframes:
-            raise SystemExit("--camera ne s'utilise pas avec --keyframes : un dessin tenu change "
-                             "de cadrage à chaque frame. La trajectoire caméra est dans le JSON.")
+            raise SystemExit("--camera cannot be used with --keyframes: a held drawing is framed "
+                             "differently on every frame. The camera track is in the JSON.")
         renderer = ClipRenderer.__new__(ClipRenderer)
         renderer.pw, renderer.ph = pw, ph
         cam = clip.get('camera')
@@ -473,9 +475,9 @@ def export_layers(a):
     os.makedirs(a.out, exist_ok=True)
     cw, ch = max(1, round(pw * a.scale)), max(1, round(ph * a.scale))
     mode = 'keyframes' if a.keyframes else 'frames'
-    print(f"{a.tvpp} — clip « {clip['name']} » — {len(sel)} calque(s) — frames {f0} à {f1} — "
-          f"{'dessins seuls' if a.keyframes else 'toutes les frames'}"
-          f"{' — à travers la caméra' if a.camera else ''}")
+    print(f"{a.tvpp} — clip \"{clip['name']}\" — {len(sel)} layer(s) — frames {f0} to {f1} — "
+          f"{'drawings only' if a.keyframes else 'every frame'}"
+          f"{' — through the camera' if a.camera else ''}")
 
     doc = {
         'source': os.path.basename(a.tvpp),
@@ -488,7 +490,7 @@ def export_layers(a):
                        else {'width': cw, 'height': ch}),
         'scale': a.scale,
         'frame_range': [f0, f1],
-        'frame_numbering': "0 = première frame du projet (la timeline TVPaint affiche +1)",
+        'frame_numbering': "0 = first frame of the project (the TVPaint timeline shows +1)",
         'alpha': 'straight',
         'camera': {
             'output': {'width': info['output']['width'], 'height': info['output']['height'],
@@ -496,14 +498,14 @@ def export_layers(a):
             'motion_blur': cam['motion_blur'] if cam else 0.0,
             'track': track,
         },
-        'layer_order': "du haut vers le bas, comme dans TVPaint ; composer en partant du dernier",
+        'layer_order': "top to bottom, as in TVPaint; composite starting from the last one",
         'layers': [],
     }
 
     png_opts = {'compress_level': a.png_level}
     jobs = max(1, min(a.jobs or 1, len(sel)))
     if jobs > 1 and 'fork' not in multiprocessing.get_all_start_methods():
-        print("  (--jobs ignoré sur ce système : export calque après calque)")
+        print("  (--jobs ignored on this system: exporting one layer after another)")
         jobs = 1
 
     def progress(msg):
@@ -529,7 +531,7 @@ def export_layers(a):
                 return None, None
             return ids[k], k
 
-        # dessins utilisés dans la plage, nommés par leur première frame d'apparition
+        # drawings used in the range, named after the first frame they appear on
         first_seen, empty = {}, set()
         for f in frames:
             did, _ = drawing_at(f)
@@ -581,13 +583,13 @@ def export_layers(a):
         if a.keyframes:
             for did, f in sorted(first_seen.items(), key=lambda kv: kv[1]):
                 px = drawing_pixels(did)
-                if not np.frombuffer(px, np.uint8)[3::4].any():      # dessin entièrement vide
+                if not np.frombuffer(px, np.uint8)[3::4].any():      # completely empty drawing
                     empty.add(did)
                     continue
                 fn = f"{name}_{f:04d}.png"
                 make_image(px, f).save(os.path.join(ldir, fn), **png_opts)
                 drawings.append({'file': f"{folder}/{fn}", 'first_frame': f, 'layer_frame': did})
-                progress(f"  {meta['name']} : dessin {len(drawings)}")
+                progress(f"  {meta['name']}: drawing {len(drawings)}")
             files = {dd['layer_frame']: dd['file'] for dd in drawings}
             for f in frames:
                 did, _ = drawing_at(f)
@@ -600,7 +602,7 @@ def export_layers(a):
                 did, _ = drawing_at(f)
                 fn = f"{name}_{f:04d}.png"
                 path = os.path.join(ldir, fn)
-                # une tenue ne change pas l'image (sauf à travers une caméra qui bouge)
+                # a hold does not change the image (except through a moving camera)
                 key = (did, f) if a.camera else did
                 if did is None:
                     if a.skip_empty:
@@ -625,9 +627,9 @@ def export_layers(a):
                     last_key = key
                     written += 1
                 timeline.append(f"{folder}/{fn}")
-                progress(f"  {meta['name']} : frame {f}")
+                progress(f"  {meta['name']}: frame {f}")
 
-        # expositions : suites de frames montrant le même fichier
+        # exposures: runs of frames showing the same file
         exposures = []
         for f, fn in zip(frames, timeline):
             if exposures and exposures[-1]['file'] == fn and \
@@ -641,7 +643,7 @@ def export_layers(a):
         layer_doc['key_frames'] = sorted(f for did, f in first_seen.items() if did not in empty)
         layer_doc['timeline'] = timeline
         n_files = len(drawings) if a.keyframes else sum(1 for x in timeline if x)
-        print(f"  {meta['name']} : {n_files} image(s)" + ' ' * 20, flush=True)
+        print(f"  {meta['name']}: {n_files} image(s)" + ' ' * 20, flush=True)
         return layer_doc
 
     if jobs == 1:
@@ -652,41 +654,42 @@ def export_layers(a):
         with multiprocessing.get_context('fork').Pool(jobs) as pool:
             doc['layers'] = pool.map(_run_layer_job, sel, chunksize=1)
 
-    jname = a.json or f"{safe_name(clip['name'])}_{'exposition' if a.keyframes else 'calques'}.json"
+    jname = a.json or f"{safe_name(clip['name'])}_{'exposure' if a.keyframes else 'layers'}.json"
     with open(os.path.join(a.out, jname), 'w', encoding='utf-8') as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=1)
-    print(f"{jname} écrit — {time.time() - t_start:.1f} s")
+    print(f"{jname} written — {time.time() - t_start:.1f} s")
     return 0
 
 
 def main(argv):
-    ap = argparse.ArgumentParser(description='Rendu composé d\'un clip TVPaint (.tvpp), '
-                                             'ou export calque par calque (--layers).')
+    ti.utf8_console()
+    ap = argparse.ArgumentParser(description='Composited render of a TVPaint clip (.tvpp), '
+                                             'or layer-by-layer export (--layers).')
     ap.add_argument('tvpp')
     ap.add_argument('out')
     ap.add_argument('--clip', type=int, default=1)
     ap.add_argument('--frames')
-    ap.add_argument('--bg', default='projet')
+    ap.add_argument('--bg', default='project')
     ap.add_argument('--scale', type=float, default=1.0)
     ap.add_argument('--blur-samples', type=int, default=8)
     ap.add_argument('--prefix')
-    g = ap.add_argument_group('export par calque')
+    g = ap.add_argument_group('per-layer export')
     g.add_argument('--layers', nargs='?', const='all',
-                   help="exporter les calques séparément : all (défaut) ou liste « nom,nom,3 »")
+                   help="export layers separately: all (default) or a \"name,name,3\" list")
     g.add_argument('--keyframes', action='store_true',
-                   help="seulement les dessins (une image par dessin) + JSON d'exposition")
+                   help="drawings only (one image per drawing) + exposure JSON")
     g.add_argument('--camera', action='store_true',
-                   help="calques cadrés par la caméra (toutes les frames) au lieu de la feuille entière")
+                   help="layers framed by the camera (every frame) instead of the whole canvas")
     g.add_argument('--include-hidden', action='store_true',
-                   help="avec --layers all : inclure les calques masqués")
+                   help="with --layers all: include hidden layers")
     g.add_argument('--skip-empty', action='store_true',
-                   help="ne pas écrire d'image transparente quand le calque est vide")
+                   help="write no transparent image when the layer is empty")
     g.add_argument('--png-level', type=int, default=3,
-                   help="compression PNG 0-9 (3 par défaut : bon compromis vitesse/poids)")
+                   help="PNG compression 0-9 (3 by default: good speed/size trade-off)")
     g.add_argument('--jobs', type=int, default=1,
-                   help="calques exportés en parallèle (Linux/Mac ; ~1 Go de mémoire par job sur un gros plan)")
-    g.add_argument('--json', help="nom du fichier JSON (défaut : <clip>_exposition.json ou _calques.json)")
-    ap.add_argument('--version', action='version', version='tvpp_render ' + ti.__version__)
+                   help="layers exported in parallel (Linux/Mac; ~1 GB of memory per job on a large shot)")
+    g.add_argument('--json', help="JSON file name (default: <clip>_exposure.json or _layers.json)")
+    ap.add_argument('--version', action='version', version='opentvp_render ' + ti.__version__)
     a = ap.parse_args(argv)
     if a.layers is not None or a.keyframes:
         return export_layers(a)
@@ -705,13 +708,13 @@ def main(argv):
     bg = r.background(a.bg)
     os.makedirs(a.out, exist_ok=True)
     prefix = a.prefix or re.sub(r'[^\w.-]+', '_', c['name'])
-    print(f"{a.tvpp} — clip « {c['name']} » — frames {f0} à {f1} — sortie {r.ow}×{r.oh}"
-          f"{' — flou ' + format(r.blur, 'g') if r.blur else ''}")
+    print(f"{a.tvpp} — clip \"{c['name']}\" — frames {f0} to {f1} — output {r.ow}×{r.oh}"
+          f"{' — blur ' + format(r.blur, 'g') if r.blur else ''}")
     for f in range(f0, f1 + 1):
         img = r.render(f)
         to_image(img, bg, r.last_cover).save(os.path.join(a.out, f'{prefix}_{f:04d}.png'))
         print(f"  frame {f}", end='\r', flush=True)
-    print(f"\n{f1 - f0 + 1} images en {time.time() - t_start:.1f} s")
+    print(f"\n{f1 - f0 + 1} images in {time.time() - t_start:.1f} s")
     return 0
 
 

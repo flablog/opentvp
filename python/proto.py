@@ -1,8 +1,10 @@
-"""Prototype décodeur .tvpp — calques et pixels (TVPaint 11.7)."""
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Les Fées Spéciales
+""".tvpp decoder prototype — layers and pixels (TVPaint 11.7)."""
 import struct, sys, re
 
 def chunks(d, start, end):
-    """Itère les chunks IFF : tag 4 octets + taille u32 big-endian."""
+    """Iterates over IFF chunks: 4-byte tag + big-endian u32 size."""
     i = start
     while i + 8 <= end:
         tag = d[i:i+4]
@@ -13,23 +15,23 @@ def chunks(d, start, end):
         i += 8 + size
 
 def unpackbits_bgra(data, width, height):
-    """PackBits sur des pixels de 4 octets (BGRA), ligne par ligne."""
+    """PackBits on 4-byte pixels (BGRA), row by row."""
     out = bytearray(); i = 0
     for _ in range(height):
         row = bytearray()
         while len(row) < width * 4:
             n = data[i]; i += 1
-            if n >= 128:                      # répétition : 257 - n pixels
+            if n >= 128:                      # run: 257 - n pixels
                 count = 257 - n
                 row += data[i:i+4] * count; i += 4
-            else:                             # littéral : n + 1 pixels
+            else:                             # literal: n + 1 pixels
                 count = n + 1
                 row += data[i:i+4*count]; i += 4 * count
         out += row
     return bytes(out), i
 
 def unpremultiply_bgra(raw):
-    """Les pixels sont stockés en alpha prémultiplié : on revient en alpha droit."""
+    """Pixels are stored with premultiplied alpha: convert back to straight alpha."""
     out = bytearray(raw)
     for i in range(0, len(out), 4):
         a = out[i+3]
@@ -39,7 +41,7 @@ def unpremultiply_bgra(raw):
     return bytes(out)
 
 def zchk_unwrap(body):
-    """Bloc ZCHK : renvoie (tag interne, contenu interne décompressé)."""
+    """ZCHK chunk: returns (inner tag, decompressed inner content)."""
     import zlib
     nb = struct.unpack('>I', body[16:20])[0]
     i, out = 20, bytearray()
@@ -54,14 +56,14 @@ def layers(path):
     res = []
     for m in re.finditer(rb'LNAM', d):
         cur = {}
-        dk, sk = 'dbod', 'sraw'          # après LRSR : série « résultat » d'un CTG
+        dk, sk = 'dbod', 'sraw'          # after LRSR: "result" series of a CTG
         for tag, off, body in chunks(d, m.start(), len(d)):
             if tag == 'ZCHK':
                 tag, body = zchk_unwrap(body)
-            if tag == 'LRSH':            # en-tête d'un calque CTG
+            if tag == 'LRSH':            # header of a CTG layer
                 cur['ctg'] = True
                 tag = 'LRHD'
-            if tag == 'LRSR':            # début des images résultat (remplissage calculé)
+            if tag == 'LRSR':            # start of the result images (computed fill)
                 dk, sk = 'rdbod', 'rsraw'
                 cur['rsraw'] = []
                 continue
@@ -83,7 +85,7 @@ def layers(path):
     return d, res
 
 def _tiles_from_image(raw, width, height, ts):
-    """Découpe une image BGRA en tuiles (raster), pour servir de référence."""
+    """Splits a BGRA image into tiles (raster order), to serve as reference."""
     tiles = []
     for ty in range(0, height, ts):
         for tx in range(0, width, ts):
@@ -105,21 +107,21 @@ def _image_from_tiles(tiles, width, height, ts):
     return bytes(out)
 
 def layer_images(layer, width, height, result=None):
-    """Rend la liste des images d'un calque (BGRA prémultiplié brut).
+    """Returns the list of a layer's images (raw premultiplied BGRA).
 
-    Calques CTG : la série principale contient les squiggles ; si TVPaint a
-    enregistré le remplissage calculé (série après le bloc LRSR), il est rendu
-    à la place. result=True/False force l'une ou l'autre série.
+    CTG layers: the main series holds the squiggles; if TVPaint stored the
+    computed fill (series after the LRSR chunk), it is rendered instead.
+    result=True/False forces one series or the other.
 
-    Image 0 : bloc DBOD, PackBits ligne par ligne sur toute la largeur.
-    Images suivantes : blocs SRAW =
-      en-tête 4×u32 : taille de tuile (64), taille miniature, largeur et hauteur miniature
-      miniature PackBits (flux continu)
-      u32 nombre de tuiles, puis pour chaque tuile (ordre raster) :
-        u32 taille > 0 : tuile PackBits de cette taille
-        u32 0, u32 source, u32 index :
-            source 1 = tuile <index> de l'image précédente
-            source 0 = tuile <index> de l'image courante (déduplication)
+    Image 0: DBOD chunk, PackBits row by row over the full width.
+    Following images: SRAW chunks =
+      4×u32 header: tile size (64), thumbnail size, thumbnail width and height
+      PackBits thumbnail (continuous stream)
+      u32 number of tiles, then for each tile (raster order):
+        u32 size > 0: PackBits tile of that size
+        u32 0, u32 source, u32 index:
+            source 1 = tile <index> of the previous image
+            source 0 = tile <index> of the current image (deduplication)
     """
     use_result = layer.get('ctg') and bool(layer.get('rsraw') or layer.get('rdbod'))
     if result is not None:
@@ -129,26 +131,26 @@ def layer_images(layer, width, height, result=None):
         if layer.get('rdbod'):
             raw, _ = unpackbits_bgra(layer['rdbod'][0][1], width, height)
             return _decode_chain([raw], seq, width, height)
-        # pas de DBOD : la série résultat part d'une image vide (non rendue)
+        # no DBOD: the result series starts from an empty image (not rendered)
         return _decode_chain([bytes(width * height * 4)], seq, width, height, base=1)[1:]
     raw, _ = unpackbits_bgra(layer['dbod'][0][1], width, height)
     return _decode_chain([raw], layer.get('sraw', []), width, height)
 
 def _decode_chain(imgs, seq, width, height, base=0, lookup=None):
-    """Applique les entrées SRAW de seq à la liste imgs.
-    base : décalage entre l'index de frame et l'index dans imgs (1 pour une série
-    résultat CTG qui commence par une image vide fictive).
-    lookup : fonction index_de_frame -> image, pour les références (type 2)."""
+    """Applies the SRAW entries of seq to the imgs list.
+    base: offset between the frame index and the index in imgs (1 for a CTG
+    result series that starts with a dummy empty image).
+    lookup: frame_index -> image function, for references (type 2)."""
     for _, body in seq:
         kind = struct.unpack('>I', body[:4])[0]
         if kind == 6:
-            # 6 = la frame prolonge l'exposition précédente (tenue)
+            # 6 = the frame extends the previous exposure (hold)
             imgs.append(imgs[-1])
             continue
         if kind == 2:
-            # 2 = nouvelle instance qui reprend l'image de la frame <src> du calque
-            #     (coupure d'exposition : src = frame précédente ; réutilisation d'un
-            #     dessin plus ancien sinon)
+            # 2 = new instance reusing the image of layer frame <src>
+            #     (exposure break: src = previous frame; otherwise reuse of an
+            #     older drawing)
             src = struct.unpack('>I', body[4:8])[0]
             if lookup is not None:
                 imgs.append(lookup(src))
@@ -158,13 +160,13 @@ def _decode_chain(imgs, seq, width, height, base=0, lookup=None):
                 imgs.append(imgs[-1])
             continue
         if kind == 5:
-            # 5 = nouvelle instance vide (image transparente)
+            # 5 = new empty instance (transparent image)
             imgs.append(bytes(width * height * 4))
             continue
         if kind != 0x40:
-            raise NotImplementedError(f'type de frame SRAW inconnu : {kind}')
+            raise NotImplementedError(f'unknown SRAW frame type: {kind}')
         ts, thumb_size, thw, thh = struct.unpack('>4I', body[:16])
-        # la miniature (PackBits, thw×thh) occupe thumb_size - 8 octets
+        # the thumbnail (PackBits, thw×thh) takes thumb_size - 8 bytes
         i = 16 + thumb_size - 8
         prev = _tiles_from_image(imgs[-1], width, height, ts)
         count = struct.unpack('>I', body[i:i + 4])[0]; i += 4
@@ -182,7 +184,7 @@ def _decode_chain(imgs, seq, width, height, base=0, lookup=None):
     return imgs
 
 def layer_ext(layer):
-    """Bloc LEXT (texte INI) : identifiants et noms d'instance, indexés par frame."""
+    """LEXT chunk (INI text): instance ids and names, indexed by frame."""
     sections = {}; cur = None
     for body in layer.get('lext', []):
         for line in body.decode('utf-8-sig', 'replace').splitlines():
@@ -194,19 +196,19 @@ def layer_ext(layer):
     return sections
 
 def layer_timeline(layer, width, height):
-    """Instances du calque : liste de dicts {start, duration, raw}.
+    """Layer instances: list of {start, duration, raw} dicts.
 
-    Le calque stocke une entrée par frame (DBOD puis un SRAW par frame) :
-      SRAW type 0x40 -> nouvelle instance avec ses pixels (tuiles)
-      SRAW type 6    -> tenue : la frame prolonge l'instance en cours
-      SRAW type 2    -> nouvelle instance, mêmes pixels (coupure d'exposition)
-      SRAW type 5    -> nouvelle instance vide
-    La première frame du calque est donnée par LRHD (octets 4-7).
+    The layer stores one entry per frame (DBOD, then one SRAW per frame):
+      SRAW type 0x40 -> new instance with its pixels (tiles)
+      SRAW type 6    -> hold: the frame extends the current instance
+      SRAW type 2    -> new instance, same pixels (exposure break)
+      SRAW type 5    -> new empty instance
+    The first frame of the layer is given by LRHD (bytes 4-7).
     """
     frames = layer_images(layer, width, height)
     start, end, count = struct.unpack('>3I', layer['lrhd'][4:16])
     if count == 0:
-        # calque image (non animé) : une seule image affichée de start à end
+        # image layer (not animated): a single image shown from start to end
         return [{'start': start, 'duration': end - start + 1, 'raw': frames[0]}]
     names = layer_ext(layer).get('images name', {})
     kinds = [None] + [struct.unpack('>I', b[:4])[0] for _, b in layer.get('sraw', [])]
@@ -222,8 +224,8 @@ def layer_timeline(layer, width, height):
 BEHAVIORS = {0: 'none', 1: 'repeat', 2: 'pingpong', 3: 'hold'}
 
 def _behave(rel, n, mode):
-    """Index (0..n-1) de la frame du calque montrée à la position relative rel,
-    hors de la plage du calque, selon le comportement ; None si rien n'est affiché."""
+    """Index (0..n-1) of the layer frame shown at relative position rel,
+    outside the layer's range, according to the behaviour; None if nothing is shown."""
     if mode == 'repeat':
         return rel % n
     if mode == 'pingpong':
@@ -236,8 +238,8 @@ def _behave(rel, n, mode):
     return None
 
 def frame_sources(layer, total_frames):
-    """Pour chaque frame du plan, l'index de la frame du calque affichée (ou None).
-    Applique les comportements avant/après (LRHD : u16 @52 = avant, u16 @44 = après)."""
+    """For each frame of the shot, the index of the layer frame shown (or None).
+    Applies pre/post behaviours (LRHD: u16 @52 = pre, u16 @44 = post)."""
     start, end, count = struct.unpack('>3I', layer['lrhd'][4:16])
     pre = BEHAVIORS.get(struct.unpack('>H', layer['lrhd'][52:54])[0], 'none')
     post = BEHAVIORS.get(struct.unpack('>H', layer['lrhd'][44:46])[0], 'none')
@@ -245,7 +247,7 @@ def frame_sources(layer, total_frames):
     out = []
     for f in range(total_frames):
         rel = f - start
-        if count == 0:                       # calque image : visible de start à end
+        if count == 0:                       # image layer: visible from start to end
             out.append(0 if start <= f <= end else None)
         elif 0 <= rel < n:
             out.append(rel)
@@ -263,8 +265,8 @@ BLEND_MODES = {
 }
 
 def project_info(d):
-    """En-tête projet : u32 nombre de paires à 0x30, puis paires clé/valeur
-    (u16 longueur + UTF-16 BE)."""
+    """Project header: u32 number of pairs at 0x30, then key/value pairs
+    (u16 length + UTF-16 BE)."""
     count = struct.unpack('>I', d[0x30:0x34])[0]
     i = 0x34; info = {}
     for _ in range(count):
@@ -276,9 +278,9 @@ def project_info(d):
     return info
 
 def layer_props(lrhd):
-    """Champs connus du bloc LRHD (104 octets)."""
-    pre = BEHAVIORS.get(struct.unpack('>H', lrhd[52:54])[0], 'inconnu')
-    post = BEHAVIORS.get(struct.unpack('>H', lrhd[44:46])[0], 'inconnu')
+    """Known fields of the LRHD chunk (104 bytes)."""
+    pre = BEHAVIORS.get(struct.unpack('>H', lrhd[52:54])[0], 'unknown')
+    post = BEHAVIORS.get(struct.unpack('>H', lrhd[44:46])[0], 'unknown')
     start, end, count = struct.unpack('>3I', lrhd[4:16])
     flags = struct.unpack('>I', lrhd[28:32])[0]
     blend = struct.unpack('>I', lrhd[60:64])[0]
@@ -289,13 +291,13 @@ def layer_props(lrhd):
         'density': round(lrhd[19] / 255, 4),
         'visible': not (flags & 0x01),
         'locked': bool(flags & 0x10),
-        'blending': BLEND_MODES.get(blend, f'inconnu_{blend}'),
+        'blending': BLEND_MODES.get(blend, f'unknown_{blend}'),
         'pre_behavior': pre,
         'post_behavior': post,
     }
 
 if __name__ == '__main__':
-    # usage : python proto.py fichier.tvpp [dossier_sortie]
+    # usage: python proto.py file.tvpp [out_folder]
     import os, json
     from PIL import Image
     path = sys.argv[1]
@@ -319,9 +321,9 @@ if __name__ == '__main__':
                 Image.frombytes('RGBA', (w, h), unpremultiply_bgra(it['raw']), 'raw', 'BGRA') \
                      .save(os.path.join(out, fname))
         report['layers'].append({'name': l['name'], **props, 'exposures': timing})
-        print(f"calque {li+1} '{l['name']}' : {props}")
+        print(f"layer {li+1} '{l['name']}': {props}")
         for t in timing:
-            print(f"    frames {t['start']}-{t['start'] + t['duration'] - 1} : {t['image']}")
+            print(f"    frames {t['start']}-{t['start'] + t['duration'] - 1}: {t['image']}")
     if out:
         with open(os.path.join(out, 'structure.json'), 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=2, ensure_ascii=False)

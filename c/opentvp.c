@@ -1,17 +1,20 @@
 /*
- * tvpp — lecture et rendu de fichiers TVPaint 11 (.tvpp) sans TVPaint.
+ * opentvp — reading and rendering TVPaint 11 files (.tvpp) without TVPaint.
  *
- *   tvpp info   fichier.tvpp [--json]
- *   tvpp render fichier.tvpp dossier [--clip N] [--frames A-B] [--bg projet|transparent|#RRGGBB]
- *                                     [--scale S] [--blur-samples N] [--threads N] [--prefix NOM]
+ *   opentvp info   file.tvpp [--json]
+ *   opentvp render file.tvpp folder [--clip N] [--frames A-B] [--bg project|transparent|#RRGGBB]
+ *                                 [--scale S] [--blur-samples N] [--threads N] [--prefix NAME]
  *
- * Format établi par rétro-ingénierie (Les Fées Spéciales, 2026), validé contre
- * les rendus TVPaint 11.7. Dépendance : libdeflate (MIT), pour la
- * décompression des blocs ZCHK et la compression des PNG.
+ * Format reverse-engineered (Les Fées Spéciales, 2026), validated against
+ * TVPaint 11.7 renders. Dependency: libdeflate (MIT), for decompressing
+ * ZCHK chunks and compressing PNGs.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ * Copyright (C) 2026 Les Fées Spéciales
  */
 #define _FILE_OFFSET_BITS 64
-#ifndef TVPP_VERSION
-#define TVPP_VERSION "dev"
+#ifndef OPENTVP_VERSION
+#define OPENTVP_VERSION "dev"
 #endif
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,12 +51,12 @@ static int mkdir_u8(const char *p) { wchar_t *w = widen(p); int r = _wmkdir(w); 
 
 #include "third_party/libdeflate/libdeflate.h"
 
-/* ------------------------------------------------------------------ outils */
+/* ------------------------------------------------------------------ utilities */
 
-static void die(const char *msg) { fprintf(stderr, "erreur : %s\n", msg); exit(1); }
-static void *xmalloc(size_t n) { void *p = malloc(n ? n : 1); if (!p) die("mémoire insuffisante"); return p; }
-static void *xcalloc(size_t n) { void *p = calloc(1, n ? n : 1); if (!p) die("mémoire insuffisante"); return p; }
-static void *xrealloc(void *p, size_t n) { p = realloc(p, n ? n : 1); if (!p) die("mémoire insuffisante"); return p; }
+static void die(const char *msg) { fprintf(stderr, "error: %s\n", msg); exit(1); }
+static void *xmalloc(size_t n) { void *p = malloc(n ? n : 1); if (!p) die("out of memory"); return p; }
+static void *xcalloc(size_t n) { void *p = calloc(1, n ? n : 1); if (!p) die("out of memory"); return p; }
+static void *xrealloc(void *p, size_t n) { p = realloc(p, n ? n : 1); if (!p) die("out of memory"); return p; }
 
 static uint32_t be32(const uint8_t *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
 static uint16_t be16(const uint8_t *p) { return (uint16_t)((p[0] << 8) | p[1]); }
@@ -64,7 +67,7 @@ typedef struct { uint8_t *d; size_t n; } Buf;
 static Buf read_file(const char *path) {
     Buf b = {0, 0};
     FILE *f = fopen_u8(path, "rb");
-    if (!f) { fprintf(stderr, "erreur : impossible d'ouvrir %s\n", path); exit(1); }
+    if (!f) { fprintf(stderr, "error: cannot open %s\n", path); exit(1); }
     size_t cap = 1 << 24;
     b.d = xmalloc(cap);
     for (;;) {
@@ -104,7 +107,7 @@ static char *utf16be_to_utf8(const uint8_t *p, int nchars) {
     return s;
 }
 
-/* ------------------------------------------------------------------ listes clé/valeur */
+/* ------------------------------------------------------------------ key/value lists */
 
 typedef struct { char *k, *v; } KV;
 typedef struct { KV *a; int n; } KVList;
@@ -118,7 +121,7 @@ static double kv_num(const KVList *l, const char *k, double dflt) {
     return v ? atof(v) : dflt;
 }
 
-/* u32 nombre de paires, puis (u16 longueur + UTF-16 BE) x 2 */
+/* u32 number of pairs, then (u16 length + UTF-16 BE) x 2 */
 static KVList read_kv_utf16(const uint8_t *p, const uint8_t *end) {
     KVList l = {0, 0};
     if (p + 4 > end) return l;
@@ -138,7 +141,7 @@ static KVList read_kv_utf16(const uint8_t *p, const uint8_t *end) {
     return l;
 }
 
-/* section INI « [name] » : lignes clé=valeur jusqu'à la section suivante */
+/* INI section "[name]": key=value lines up to the next section */
 static KVList read_ini_section(const uint8_t *h, size_t hn, const char *name) {
     KVList l = {0, 0};
     char hdr[128];
@@ -166,15 +169,15 @@ static KVList read_ini_section(const uint8_t *h, size_t hn, const char *name) {
     return l;
 }
 
-/* ------------------------------------------------------------------ blocs ZCHK (zlib) */
+/* ------------------------------------------------------------------ ZCHK chunks (zlib) */
 
-/* corps ZCHK -> bloc interne complet décompressé (tag + taille + contenu) */
+/* ZCHK body -> complete decompressed inner chunk (tag + size + content) */
 static uint8_t *zchk_inflate(const uint8_t *body, uint32_t size, uint32_t *outlen, int first_block_only) {
     if (size < 20 || memcmp(body + 8, "czmp", 4) != 0) return NULL;
     uint32_t nb = be32(body + 16);
     size_t cap = 0;
     const uint8_t *q = body + 20, *end = body + size;
-    /* taille totale = somme des tailles brutes */
+    /* total size = sum of the raw sizes */
     const uint8_t *s = q;
     for (uint32_t i = 0; i < nb && s + 12 <= end; i++) { cap += be32(s + 4); s += 12 + be32(s + 8); }
     if (first_block_only && nb > 0) cap = be32(q + 4);
@@ -204,11 +207,11 @@ static uint8_t *zchk_inflate(const uint8_t *body, uint32_t size, uint32_t *outle
 /* ------------------------------------------------------------------ structures */
 
 typedef struct {
-    const uint8_t *p;   /* contenu (non compressé) ou corps ZCHK */
+    const uint8_t *p;   /* content (uncompressed) or ZCHK body */
     uint32_t size;
     int zchk;
-    uint32_t kind;      /* SRAW : 0x40 image, 6 tenue, 5 vide, 2 référence ; DBOD : 0 */
-    uint32_t ref;       /* type 2 : frame source */
+    uint32_t kind;      /* SRAW: 0x40 image, 6 hold, 5 empty, 2 reference; DBOD: 0 */
+    uint32_t ref;       /* type 2: source frame */
 } Entry;
 
 typedef struct { Entry *a; int n, cap; } EntryList;
@@ -224,7 +227,7 @@ typedef struct {
     uint32_t start, end, count;
     double opacity;
     int visible, locked;
-    int pre, post;          /* 0 aucun, 1 répéter, 2 ping-pong, 3 tenir */
+    int pre, post;          /* 0 none, 1 repeat, 2 ping-pong, 3 hold */
     int blend;
     int has_dbod, has_rdbod, has_result;
     Entry dbod, rdbod;
@@ -235,11 +238,11 @@ typedef struct { double x, y, rot, zoom; } CamPt;
 
 typedef struct {
     char *name;
-    int hidden, mark_in, mark_out;   /* -1 si absent */
+    int hidden, mark_in, mark_out;   /* -1 if absent */
     Layer *layers; int nlayers;
     int frames, visible_frames;
     CamPt *pts; int npts;
-    int prof_type;                   /* 0 courbe, 1 linéaire, 2 polynomial */
+    int prof_type;                   /* 0 curve, 1 linear, 2 polynomial */
     double prof[64][2]; int nprof;
     double blur;
     uint8_t bg1[4], bg2[4]; int has_bg;
@@ -261,7 +264,7 @@ static const char *BLEND_NAMES[] = {
 static const char *blend_name(int b) { return (b >= 0 && b <= 28) ? BLEND_NAMES[b] : "?"; }
 static const char *BEHAV[] = {"none", "repeat", "pingpong", "hold"};
 
-/* ------------------------------------------------------------------ lecture des calques */
+/* ------------------------------------------------------------------ reading layers */
 
 static int is_tag(const uint8_t *p) {
     for (int i = 0; i < 4; i++) {
@@ -294,7 +297,7 @@ static void read_layers(Clip *c, const uint8_t *a, const uint8_t *b) {
     int result_mode = 0;
     while (p && p + 8 <= b) {
         if (!is_tag(p)) {
-            /* octet de bourrage éventuel après un bloc de taille impaire */
+            /* possible padding byte after an odd-sized chunk */
             if (p + 9 <= b && is_tag(p + 1)) { p++; continue; }
             break;
         }
@@ -346,7 +349,7 @@ static void read_layers(Clip *c, const uint8_t *a, const uint8_t *b) {
         free(tmp);
         p = body + size;
         if (strcmp(tag, "XSRC") == 0 || strcmp(tag, "FCFG") == 0) {
-            /* fin du dernier calque : on continue pour retrouver d'éventuels autres LNAM */
+            /* end of the last layer: keep going to find any other LNAM */
             const uint8_t *q = memfind(p, (size_t)(b - p), "LNAM");
             if (!q) break;
             p = q;
@@ -354,7 +357,7 @@ static void read_layers(Clip *c, const uint8_t *a, const uint8_t *b) {
     }
 }
 
-/* ------------------------------------------------------------------ projet, clips, caméra */
+/* ------------------------------------------------------------------ project, clips, camera */
 
 #define SEC_ROOT "\x33\x84\x78\x0e"
 #define SEC_SHOT "\x33\x86\x31\xb2"
@@ -362,7 +365,7 @@ static void read_layers(Clip *c, const uint8_t *a, const uint8_t *b) {
 #define SEC_CLIP_HDR "\x33\x87\xe3\x4a"
 #define SEC_CLIP_BODY "\x33\x87\x11\x54"
 
-/* sous-sections (GUID 16 octets + taille u64) d'id donné dans [a, b) */
+/* subsections (16-byte GUID + u64 size) with the given id in [a, b) */
 static int find_sections(const uint8_t *a, const uint8_t *b, const char *id, const uint8_t **out_a, const uint8_t **out_b, int max) {
     int n = 0;
     const uint8_t *p = a;
@@ -412,7 +415,7 @@ static Project load_project(const char *path) {
     memset(&P, 0, sizeof P);
     P.file = read_file(path);
     const uint8_t *d = P.file.d, *e = d + P.file.n;
-    if (P.file.n < 0x40) die("fichier trop court");
+    if (P.file.n < 0x40) die("file too short");
     KVList hdr = read_kv_utf16(d + 0x30, e);
     P.width = (int)kv_num(&hdr, "Width", 0);
     P.height = (int)kv_num(&hdr, "Height", 0);
@@ -423,7 +426,7 @@ static Project load_project(const char *path) {
     const char *au = kv_get(&hdr, "Author"), *md = kv_get(&hdr, "LastChangeDate");
     P.author = au ? strdup(au) : strdup("");
     P.modified = md ? strdup(md) : strdup("");
-    if (P.width <= 0 || P.height <= 0) die("en-tête de projet illisible (ce n'est pas un .tvpp TVPaint 11 ?)");
+    if (P.width <= 0 || P.height <= 0) die("unreadable project header (not a TVPaint 11 .tvpp?)");
 
     const uint8_t *ra[4], *rb[4], *sa[64], *sb[64], *ca[256], *cb[256], *xa[2], *xb[2];
     int nr = find_sections(d, e, SEC_ROOT, ra, rb, 4);
@@ -460,11 +463,11 @@ static Project load_project(const char *path) {
             }
         }
     }
-    if (P.nclips == 0) die("aucun clip trouvé");
+    if (P.nclips == 0) die("no clip found");
     return P;
 }
 
-/* ------------------------------------------------------------------ caméra : loi de répartition */
+/* ------------------------------------------------------------------ camera: time distribution */
 
 static void camera_weights(const CamPt *p, int np, double *w) {
     int n = np - 1;
@@ -473,7 +476,7 @@ static void camera_weights(const CamPt *p, int np, double *w) {
     w[0] = L[0];
     for (int i = 1; i < n; i++) w[i] = (n - 1) * L[i - 1] + L[i];
     double tot = 0; for (int i = 0; i < n; i++) tot += w[i];
-    if (tot == 0) for (int i = 0; i < n; i++) w[i] = 1;   /* zoom / rotation seuls */
+    if (tot == 0) for (int i = 0; i < n; i++) w[i] = 1;   /* zoom / rotation only */
 }
 
 static CamPt camera_at(const CamPt *p, int np, double u) {
@@ -500,7 +503,7 @@ static double profile_eval(const Clip *c, double t) {
     if (t < P[0][0]) t = P[0][0];
     if (t > P[n - 1][0]) t = P[n - 1][0];
     double v;
-    if (c->prof_type == 2) {               /* polynôme de Lagrange */
+    if (c->prof_type == 2) {               /* Lagrange polynomial */
         v = 0;
         for (int i = 0; i < n; i++) {
             double li = 1;
@@ -514,7 +517,7 @@ static double profile_eval(const Clip *c, double t) {
         double s = h > 0 ? (t - P[k][0]) / h : 0;
         if (c->prof_type == 1 || n == 2) {
             v = P[k][1] + (P[k + 1][1] - P[k][1]) * s;
-        } else {                           /* Hermite, tangentes de Catmull-Rom, extrémités plates */
+        } else {                           /* Hermite, Catmull-Rom tangents, flat ends */
             double m0 = (k == 0) ? 0 : (P[k + 1][1] - P[k - 1][1]) / (P[k + 1][0] - P[k - 1][0]);
             double m1 = (k + 1 == n - 1) ? 0 : (P[k + 2][1] - P[k][1]) / (P[k + 2][0] - P[k][0]);
             m0 *= h; m1 *= h;
@@ -533,9 +536,9 @@ static CamPt camera_at_t(const Project *P, const Clip *c, double t) {
     return camera_at(c->pts, c->npts, profile_eval(c, t));
 }
 
-/* ------------------------------------------------------------------ décodage des pixels */
+/* ------------------------------------------------------------------ pixel decoding */
 
-/* PackBits sur pixels BGRA, ligne par ligne, écrit dans dst (pas de ligne : stride octets) */
+/* PackBits on BGRA pixels, row by row, written to dst (row pitch: stride bytes) */
 static size_t unpackbits(const uint8_t *s, size_t n, uint8_t *dst, int w, int h, size_t stride) {
     size_t i = 0;
     for (int y = 0; y < h; y++) {
@@ -560,13 +563,13 @@ static size_t unpackbits(const uint8_t *s, size_t n, uint8_t *dst, int w, int h,
     return i;
 }
 
-/* contenu d'une entrée (décompresse si besoin) ; *own = 1 si à libérer */
+/* content of an entry (decompressed if needed); *own is set if it must be freed */
 static const uint8_t *entry_body(const Entry *e, uint32_t *len, uint8_t **own) {
     *own = NULL;
     if (!e->zchk) { *len = e->size; return e->p; }
     uint32_t ol = 0;
     uint8_t *b = zchk_inflate(e->p, e->size, &ol, 0);
-    if (!b || ol < 8) die("bloc compressé illisible");
+    if (!b || ol < 8) die("unreadable compressed chunk");
     *own = b; *len = ol - 8;
     return b + 8;
 }
@@ -574,13 +577,13 @@ static const uint8_t *entry_body(const Entry *e, uint32_t *len, uint8_t **own) {
 typedef struct LayerState {
     const Layer *L;
     int w, h;
-    const Entry *first;       /* DBOD de la série utilisée, ou NULL */
+    const Entry *first;       /* DBOD of the series in use, or NULL */
     const EntryList *seq;
-    int off;                  /* entrée de la frame k : seq[k + off] */
-    uint8_t *img;             /* image courante (BGRA prémultiplié) */
+    int off;                  /* entry for frame k: seq[k + off] */
+    uint8_t *img;             /* current image (premultiplied BGRA) */
     int idx;
-    int *keep; int nkeep;     /* frames réutilisées plus loin (type 2) */
-    uint8_t **cache;          /* images gardées, indexées comme keep */
+    int *keep; int nkeep;     /* frames reused later (type 2) */
+    uint8_t **cache;          /* kept images, indexed like keep */
 } LayerState;
 
 static uint8_t *layer_get(LayerState *S, int k);
@@ -608,21 +611,21 @@ static void layer_store(LayerState *S) {
 
 static const uint8_t *layer_lookup(LayerState *S, int src) {
     for (int i = 0; i < S->nkeep; i++) if (S->keep[i] == src && S->cache[i]) return S->cache[i];
-    /* pas en cache : on relance une chaîne indépendante */
+    /* not cached: replay an independent chain */
     LayerState T; layer_init(&T, S->L, S->w, S->h);
     uint8_t *im = layer_get(&T, src);
     for (int i = 0; i < S->nkeep; i++) if (S->keep[i] == src && !S->cache[i]) { S->cache[i] = im; im = NULL; T.img = NULL; return S->cache[i]; }
     return im;
 }
 
-/* applique l'entrée e à S->img (image de la frame précédente) */
+/* applies entry e to S->img (image of the previous frame) */
 static void apply_entry(LayerState *S, const Entry *e) {
     int w = S->w, h = S->h;
     size_t sz = (size_t)w * h * 4;
     if (e->kind == 6) return;
     if (e->kind == 5) { memset(S->img, 0, sz); return; }
     if (e->kind == 2) { memcpy(S->img, layer_lookup(S, (int)e->ref), sz); return; }
-    if (e->kind != 0x40) { fprintf(stderr, "  ⚠ type de frame inconnu %u (calque %s)\n", e->kind, S->L->name); return; }
+    if (e->kind != 0x40) { fprintf(stderr, "  ⚠ unknown frame type %u (layer %s)\n", e->kind, S->L->name); return; }
     uint32_t len; uint8_t *own;
     const uint8_t *b = entry_body(e, &len, &own);
     uint32_t ts = be32(b), thumb = be32(b + 4);
@@ -642,7 +645,7 @@ static void apply_entry(LayerState *S, const Entry *e) {
         } else {
             uint32_t src = be32(b + i), idx = be32(b + i + 4); i += 8;
             const uint8_t *from = src == 1 ? prev : S->img;
-            if (src == 1 && idx == k) continue;          /* tuile inchangée */
+            if (src == 1 && idx == k) continue;          /* unchanged tile */
             int sx = (int)(idx % tx) * (int)ts, sy = (int)(idx / tx) * (int)ts;
             const uint8_t *s0 = from + ((size_t)sy * w + sx) * 4;
             for (int y = 0; y < th; y++) memmove(dst + (size_t)y * w * 4, s0 + (size_t)y * w * 4, (size_t)tw * 4);
@@ -681,7 +684,7 @@ static uint8_t *layer_get(LayerState *S, int k) {
     return S->img;
 }
 
-/* image du calque affichée à la frame f (index de frame du calque), ou -1 */
+/* layer image shown at frame f (layer frame index), or -1 */
 static int behave(int rel, int n, int mode) {
     if (mode == 1) return ((rel % n) + n) % n;
     if (mode == 2) {
@@ -700,7 +703,7 @@ static int frame_source(const Layer *L, int f) {
     return behave(rel, n, rel < 0 ? L->pre : L->post);
 }
 
-/* ------------------------------------------------------------------ rendu */
+/* ------------------------------------------------------------------ rendering */
 
 typedef struct {
     const Project *P; const Clip *C;
@@ -710,7 +713,7 @@ typedef struct {
 } Renderer;
 
 typedef struct {
-    double a, b, c, d, e, f;   /* sortie -> projet */
+    double a, b, c, d, e, f;   /* output -> project */
 } Affine;
 
 static Affine camera_affine(const CamPt *cam, int ow, int oh, double scale) {
@@ -723,7 +726,7 @@ static Affine camera_affine(const CamPt *cam, int ow, int oh, double scale) {
     return A;
 }
 
-/* échantillonnage bilinéaire (convention Pillow) ; renvoie 0 hors de l'image */
+/* bilinear sampling (Pillow convention); returns 0 outside the image */
 static inline int bilinear(const uint8_t *img, int w, int h, double xin, double yin, float out[4]) {
     if (xin < 0.0 || xin >= w || yin < 0.0 || yin >= h) return 0;
     xin -= 0.5; yin -= 0.5;
@@ -737,7 +740,7 @@ static inline int bilinear(const uint8_t *img, int w, int h, double xin, double 
         double v1 = r0[x0 * 4 + b] + (r0[x1 * 4 + b] - r0[x0 * 4 + b]) * dx;
         double v2 = r1[x0 * 4 + b] + (r1[x1 * 4 + b] - r1[x0 * 4 + b]) * dx;
         double v = v1 + (v2 - v1) * dy;
-        out[b] = (float)(int)v;            /* troncature 8 bits, comme Pillow */
+        out[b] = (float)(int)v;            /* 8-bit truncation, like Pillow */
     }
     return 1;
 }
@@ -791,7 +794,7 @@ static void render_rows(Job *J) {
                 const Affine *A = &J->aff[s];
                 double xo = x + 0.5, yo = y + 0.5;
                 double xin = A->a * xo + A->b * yo + A->c, yin = A->d * xo + A->e * yo + A->f;
-                /* part couverte par la feuille (masque constant 255, même filtre) */
+                /* share covered by the canvas (constant 255 mask, same filter) */
                 if (xin >= 0 && xin < pw && yin >= 0 && yin < ph) cov += 1.0f;
                 float out[4] = {0, 0, 0, 0};
                 for (int l = 0; l < J->n; l++) {
@@ -836,7 +839,7 @@ static void run_jobs(Job *jobs, int n) {
 
 static int g_threads = 0;
 
-/* rend la frame f : acc (RGBA prémultiplié float) et cover (part de feuille) */
+/* renders frame f: acc (premultiplied float RGBA) and cover (canvas share) */
 static void render_frame(Renderer *R, int f, float *acc, float *cover) {
     const Clip *C = R->C;
     int N = C->visible_frames > 0 ? C->visible_frames : 1;
@@ -853,7 +856,7 @@ static void render_frame(Renderer *R, int f, float *acc, float *cover) {
         CamPt cp = camera_at_t(R->P, C, t0);
         aff[0] = camera_affine(&cp, R->ow, R->oh, R->scale);
     }
-    /* calques visibles du bas vers le haut */
+    /* visible layers, bottom to top */
     const uint8_t **imgs = xmalloc(sizeof(uint8_t *) * (R->nls + 1));
     const LayerState **lays = xmalloc(sizeof(LayerState *) * (R->nls + 1));
     int n_on = 0;
@@ -878,10 +881,10 @@ static void render_frame(Renderer *R, int f, float *acc, float *cover) {
     free(jobs); free(imgs); free(lays);
 }
 
-/* ------------------------------------------------------------------ PNG rapide (libdeflate) */
+/* ------------------------------------------------------------------ fast PNG (libdeflate) */
 
 static int g_png_level = 6;
-static int g_png_filter = 0;      /* 0 aucun (le plus léger ici : aplats), 1 Sub, 2 Up, 4 Paeth */
+static int g_png_filter = 0;      /* 0 none (smallest here: flat colours), 1 Sub, 2 Up, 4 Paeth */
 
 typedef struct { uint8_t *d; size_t n, cap; } Bytes;
 static void bytes_put(Bytes *b, const void *p, size_t n) {
@@ -898,7 +901,7 @@ static void png_chunk(Bytes *b, const char *tag, const uint8_t *data, size_t n) 
     uint8_t c[4]; put_be32(c, crc); bytes_put(b, c, 4);
 }
 
-/* encode une image 8 bits (ch = 3 ou 4 canaux) dans out (réutilisable) */
+/* encodes an 8-bit image (ch = 3 or 4 channels) into out (reusable) */
 static void png_encode(Bytes *out, const uint8_t *px, int w, int h, int ch) {
     size_t stride = (size_t)w * ch, rawn = (stride + 1) * h;
     uint8_t *raw = xmalloc(rawn);
@@ -948,7 +951,7 @@ static void png_encode(Bytes *out, const uint8_t *px, int w, int h, int ch) {
 static int bytes_save(const char *path, const Bytes *b);
 
 static int write_png(const char *path, const float *acc, const float *cover, int w, int h, int mode, const float bg[3]) {
-    /* mode 0 : fond (couleur bg sur la feuille, noir ailleurs) ; 1 : transparent */
+    /* mode 0: background (bg colour on the canvas, black elsewhere); 1: transparent */
     int ch = mode == 1 ? 4 : 3;
     uint8_t *px = xmalloc((size_t)w * h * ch);
     for (size_t i = 0; i < (size_t)w * h; i++) {
@@ -977,7 +980,7 @@ static int write_png(const char *path, const float *acc, const float *cover, int
     return ok;
 }
 
-/* ------------------------------------------------------------------ commandes */
+/* ------------------------------------------------------------------ commands */
 
 static void json_str(FILE *o, const char *s) {
     fputc('"', o);
@@ -1003,7 +1006,7 @@ static int cmd_info(const char *path, int json) {
             printf(", \"hidden\": %s, \"frames\": %d, \"visible_frames\": %d, \"mark_in\": %d, \"mark_out\": %d,\n",
                    c->hidden ? "true" : "false", c->frames, c->visible_frames, c->mark_in, c->mark_out);
             printf("     \"camera\": {\"motion_blur\": %g, \"profile\": \"%s\", \"points\": [", c->blur,
-                   c->prof_type == 1 ? "lineaire" : (c->prof_type == 2 ? "polynomial" : "courbe"));
+                   c->prof_type == 1 ? "linear" : (c->prof_type == 2 ? "polynomial" : "curve"));
             for (int k = 0; k < c->npts; k++)
                 printf("%s{\"x\": %g, \"y\": %g, \"rotation\": %g, \"zoom\": %g}", k ? ", " : "", c->pts[k].x, c->pts[k].y, c->pts[k].rot, c->pts[k].zoom);
             printf("],\n      \"track\": [");
@@ -1027,34 +1030,34 @@ static int cmd_info(const char *path, int json) {
         return 0;
     }
     printf("%s\n", path);
-    printf("  Résolution   %d x %d\n  Sortie       %d x %d (caméra)\n  Cadence      %g i/s", P.width, P.height, P.out_w, P.out_h, P.fps);
-    if (fabs(P.out_fps - P.fps) > 1e-3) printf("  (caméra %g i/s : TVPaint rééchantillonne au rendu)", P.out_fps);
-    printf("\n  Modifié le   %s par %s\n  Clips        %d\n", P.modified, P.author, P.nclips);
+    printf("  Resolution   %d x %d\n  Output       %d x %d (camera)\n  Frame rate   %g fps", P.width, P.height, P.out_w, P.out_h, P.fps);
+    if (fabs(P.out_fps - P.fps) > 1e-3) printf("  (camera %g fps: TVPaint resamples at render)", P.out_fps);
+    printf("\n  Modified     %s by %s\n  Clips        %d\n", P.modified, P.author, P.nclips);
     for (int i = 0; i < P.nclips; i++) {
         Clip *c = &P.clips[i];
-        printf("\n  Clip %d « %s »%s — %d frames, contenu visible %d", i + 1, c->name, c->hidden ? " (masqué)" : "", c->frames, c->visible_frames);
-        if (c->mark_in >= 0 || c->mark_out >= 0) printf(", marques %d -> %d", c->mark_in, c->mark_out);
+        printf("\n  Clip %d \"%s\"%s — %d frames, visible content %d", i + 1, c->name, c->hidden ? " (hidden)" : "", c->frames, c->visible_frames);
+        if (c->mark_in >= 0 || c->mark_out >= 0) printf(", marks %d -> %d", c->mark_in, c->mark_out);
         printf("\n");
         for (int l = 0; l < c->nlayers; l++) {
             Layer *L = &c->layers[l];
-            printf("    %2d  %-30s %-5s %4u-%-4u %-4s %3d%%  %-10s avant:%-8s après:%-8s%s\n", l + 1, L->name,
-                   L->ctg ? "ctg" : (L->count ? "anim" : "image"), L->start, L->end, L->visible ? "vis" : "mas",
+            printf("    %2d  %-30s %-5s %4u-%-4u %-4s %3d%%  %-10s pre:%-8s post:%-8s%s\n", l + 1, L->name,
+                   L->ctg ? "ctg" : (L->count ? "anim" : "image"), L->start, L->end, L->visible ? "vis" : "hid",
                    (int)(L->opacity * 100 + 0.5), blend_name(L->blend), BEHAV[L->pre & 3], BEHAV[L->post & 3],
-                   L->locked ? "  verrou" : "");
+                   L->locked ? "  locked" : "");
         }
         if (c->npts > 0) {
-            printf("    Caméra : %d point(s)", c->npts);
-            if (c->blur > 0) printf(", flou %g", c->blur);
-            if (c->nprof > 2 || c->prof_type != 1) printf(", profil %s", c->prof_type == 1 ? "linéaire" : (c->prof_type == 2 ? "polynomial" : "courbe"));
+            printf("    Camera: %d point(s)", c->npts);
+            if (c->blur > 0) printf(", blur %g", c->blur);
+            if (c->nprof > 2 || c->prof_type != 1) printf(", profile %s", c->prof_type == 1 ? "linear" : (c->prof_type == 2 ? "polynomial" : "curve"));
             printf("\n");
             for (int k = 0; k < c->npts; k++)
-                printf("      point %d : centre (%g, %g) zoom %g rotation %g°\n", k, c->pts[k].x, c->pts[k].y, c->pts[k].zoom, c->pts[k].rot);
+                printf("      point %d: centre (%g, %g) zoom %g rotation %g°\n", k, c->pts[k].x, c->pts[k].y, c->pts[k].zoom, c->pts[k].rot);
         }
     }
     return 0;
 }
 
-/* ------------------------------------------------------------------ export calque par calque */
+/* ------------------------------------------------------------------ layer-by-layer export */
 
 typedef struct {
     const char *path, *outdir, *layers, *json;
@@ -1074,7 +1077,7 @@ static void mkdir_p(const char *path) {
     MKDIR(tmp);
 }
 
-/* comme re.sub(r'[^\w.-]+', '_', s).strip('_') */
+/* like re.sub(r'[^\w.-]+', '_', s).strip('_') */
 static char *safe_name(const char *s) {
     size_t n = strlen(s);
     char *o = xmalloc(n + 8); size_t k = 0;
@@ -1089,11 +1092,11 @@ static char *safe_name(const char *s) {
     size_t a = 0; while (o[a] == '_') a++;
     while (k > a && o[k - 1] == '_') o[--k] = 0;
     if (a) memmove(o, o + a, k - a + 1);
-    if (!o[0]) strcpy(o, "calque");
+    if (!o[0]) strcpy(o, "layer");
     return o;
 }
 
-/* identité du dessin affiché à chaque frame du calque, -1 = vide */
+/* identity of the drawing shown at each layer frame, -1 = empty */
 static int *drawing_ids(const LayerState *S, int count) {
     int n = count > 0 ? count : 1;
     int *ids = xmalloc(sizeof(int) * n);
@@ -1112,7 +1115,7 @@ static int *drawing_ids(const LayerState *S, int count) {
     return ids;
 }
 
-/* RGBA prémultiplié -> alpha droit, arrondi comme l'export TVPaint */
+/* premultiplied RGBA -> straight alpha, rounded like TVPaint's export */
 static void unpremultiply_rgba(uint8_t *px, size_t n) {
     for (size_t i = 0; i < n; i++, px += 4) {
         uint32_t a = px[3];
@@ -1124,7 +1127,7 @@ static void unpremultiply_rgba(uint8_t *px, size_t n) {
     }
 }
 
-/* redimensionnement séparable façon Pillow (filtre bilinéaire, anticrénelage) */
+/* separable resize, Pillow-style (bilinear filter, antialiased) */
 static void resample_axis(const uint8_t *src, int sw, int sh, uint8_t *dst, int dw, int dh, int horiz) {
     int in = horiz ? sw : sh, out = horiz ? dw : dh;
     double scale = (double)in / out, fs = scale > 1 ? scale : 1, support = fs;
@@ -1164,13 +1167,13 @@ static void resample_axis(const uint8_t *src, int sw, int sh, uint8_t *dst, int 
 
 typedef struct {
     const Project *P; const Clip *C; const LayerOpts *o;
-    int iw, ih;                 /* taille des images écrites */
-    int idx;                    /* index du calque dans le clip */
+    int iw, ih;                 /* size of the written images */
+    int idx;                    /* layer index in the clip */
     char *name, *folder;
-    /* résultats */
-    char **timeline;            /* f1 - f0 + 1 entrées (chemins relatifs) */
+    /* results */
+    char **timeline;            /* f1 - f0 + 1 entries (relative paths) */
     int *first_frames; int nfirst;      /* key_frames */
-    int *dr_first, *dr_lframe; int ndr; /* dessins exportés */
+    int *dr_first, *dr_lframe; int ndr; /* exported drawings */
     int nfiles;
 } LayerJob;
 
@@ -1188,11 +1191,11 @@ static void unlock(void) { pthread_mutex_unlock(&g_lock); }
 
 typedef Bytes MemBuf;
 static void write_bytes(const char *path, const MemBuf *m) {
-    if (!bytes_save(path, m)) { fprintf(stderr, "erreur d'écriture : %s\n", path); exit(1); }
+    if (!bytes_save(path, m)) { fprintf(stderr, "write error: %s\n", path); exit(1); }
 }
 static void encode_png(MemBuf *m, const uint8_t *rgba, int w, int h) { png_encode(m, rgba, w, h, 4); }
 
-/* image écrite pour la frame f à partir des pixels du calque (BGRA prémultiplié) */
+/* image written for frame f from the layer pixels (premultiplied BGRA) */
 static void make_layer_image(const LayerJob *J, const uint8_t *bgra, int f, uint8_t *out, uint8_t *tmp) {
     const Project *P = J->P; const Clip *C = J->C; const LayerOpts *o = J->o;
     int pw = P->width, ph = P->height;
@@ -1257,7 +1260,7 @@ static void export_one_layer(LayerJob *J) {
     J->first_frames = xmalloc(sizeof(int) * nfr);
     J->dr_first = xmalloc(sizeof(int) * nfr); J->dr_lframe = xmalloc(sizeof(int) * nfr);
     char fn[2400], rel[2400];
-    /* première apparition de chaque dessin dans la plage */
+    /* first appearance of each drawing in the range */
     int *first = xmalloc(sizeof(int) * nfr), nf = 0;
     for (int i = 0; i < nfr; i++) {
         if (did[i] < 0) continue;
@@ -1316,7 +1319,7 @@ static void export_one_layer(LayerJob *J) {
         (void)last_f;
     }
     lock();
-    printf("  %s : %d image(s)\n", L->name, J->nfiles); fflush(stdout);
+    printf("  %s: %d image(s)\n", L->name, J->nfiles); fflush(stdout);
     unlock();
     free(first); free(did); free(ids); free(img); free(tmp); free(png.d); free(blank.d);
     free(S.img);
@@ -1361,12 +1364,12 @@ static int select_layer(const Clip *C, const char *tok) {
 static int export_layers(LayerOpts *o) {
     time_t w_start = time(NULL);
     Project P = load_project(o->path);
-    if (o->clip < 1 || o->clip > P.nclips) die("numéro de clip invalide");
+    if (o->clip < 1 || o->clip > P.nclips) die("invalid clip number");
     Clip *C = &P.clips[o->clip - 1];
     if (o->camera && o->keyframes)
-        die("--camera ne s'utilise pas avec --keyframes : un dessin tenu change de cadrage à chaque frame. "
-            "La trajectoire caméra est dans le JSON.");
-    /* sélection */
+        die("--camera cannot be used with --keyframes: a held drawing is framed differently on every frame. "
+            "The camera track is in the JSON.");
+    /* selection */
     int *sel = xcalloc(sizeof(int) * (C->nlayers + 1)), nsel = 0;
     int all = !o->layers || !*o->layers || !strcmp(o->layers, "all") || !strcmp(o->layers, "tous");
     if (all) {
@@ -1379,7 +1382,7 @@ static int export_layers(LayerOpts *o) {
             char *e = t + strlen(t); while (e > t && e[-1] == ' ') *--e = 0;
             if (!*t) continue;
             int k = select_layer(C, t);
-            if (k < 0) { fprintf(stderr, "erreur : calque introuvable : « %s » (voir tvpp info)\n", t); return 2; }
+            if (k < 0) { fprintf(stderr, "error: layer not found: \"%s\" (see opentvp info)\n", t); return 2; }
             mark[k] = 1;
         }
         for (int i = 0; i < C->nlayers; i++) if (mark[i]) sel[nsel++] = i;
@@ -1398,8 +1401,8 @@ static int export_layers(LayerOpts *o) {
     if (iw < 1) iw = 1;
     if (ih < 1) ih = 1;
     mkdir_p(o->outdir);
-    printf("%s — clip « %s » — %d calque(s) — frames %d à %d — %s%s\n", o->path, C->name, nsel, o->f0, o->f1,
-           o->keyframes ? "dessins seuls" : "toutes les frames", o->camera ? " — à travers la caméra" : "");
+    printf("%s — clip \"%s\" — %d layer(s) — frames %d to %d — %s%s\n", o->path, C->name, nsel, o->f0, o->f1,
+           o->keyframes ? "drawings only" : "every frame", o->camera ? " — through the camera" : "");
     g_png_level = o->png_level;
 
     LayerJob *jobs = xcalloc(sizeof(LayerJob) * (nsel + 1));
@@ -1412,9 +1415,9 @@ static int export_layers(LayerOpts *o) {
         if (dup) { J->folder = xmalloc(strlen(J->name) + 8); sprintf(J->folder, "%02d_%s", sel[j] + 1, J->name); }
         else J->folder = strdup(J->name);
     }
-    /* threads : un calque par thread */
+    /* threads: one layer per thread */
     int nt = g_threads > 0 ? g_threads : cpu_count();
-    size_t per = (size_t)P.width * P.height * 4 * 4;      /* mémoire approximative par calque en cours */
+    size_t per = (size_t)P.width * P.height * 4 * 4;      /* approximate memory per layer in progress */
     if (!g_threads && per > ((size_t)400 << 20)) { int lim = 8; if (nt > lim) nt = lim; }
     if (nt > nsel) nt = nsel;
     if (nt < 1) nt = 1;
@@ -1434,9 +1437,9 @@ static int export_layers(LayerOpts *o) {
     /* JSON */
     char jpath[2400], *cname = safe_name(C->name);
     if (o->json) snprintf(jpath, sizeof jpath, "%s/%s", o->outdir, o->json);
-    else snprintf(jpath, sizeof jpath, "%s/%s_%s.json", o->outdir, cname, o->keyframes ? "exposition" : "calques");
+    else snprintf(jpath, sizeof jpath, "%s/%s_%s.json", o->outdir, cname, o->keyframes ? "exposure" : "layers");
     FILE *js = fopen_u8(jpath, "wb");
-    if (!js) die("impossible d'écrire le JSON");
+    if (!js) die("cannot write the JSON");
     const char *base = o->path + strlen(o->path);
     while (base > o->path && base[-1] != '/' && base[-1] != '\\') base--;
     fprintf(js, "{\n \"source\": "); json_str(js, base);
@@ -1444,7 +1447,7 @@ static int export_layers(LayerOpts *o) {
     fprintf(js, ",\n \"mode\": \"%s\",\n \"space\": \"%s\",\n \"fps\": %g,\n", o->keyframes ? "keyframes" : "frames", o->camera ? "camera" : "canvas", P.fps);
     fprintf(js, " \"canvas\": {\"width\": %d, \"height\": %d},\n \"image_size\": {\"width\": %d, \"height\": %d},\n \"scale\": %g,\n",
             P.width, P.height, iw, ih, sc);
-    fprintf(js, " \"frame_range\": [%d, %d],\n \"frame_numbering\": \"0 = première frame du projet (la timeline TVPaint affiche +1)\",\n \"alpha\": \"straight\",\n", o->f0, o->f1);
+    fprintf(js, " \"frame_range\": [%d, %d],\n \"frame_numbering\": \"0 = first frame of the project (the TVPaint timeline shows +1)\",\n \"alpha\": \"straight\",\n", o->f0, o->f1);
     fprintf(js, " \"camera\": {\n  \"output\": {\"width\": %d, \"height\": %d, \"fps\": %g},\n  \"motion_blur\": %g,\n  \"track\": [\n", P.out_w, P.out_h, P.out_fps, C->blur);
     int N = C->visible_frames;
     for (int i = 0; i < nfr; i++) {
@@ -1452,7 +1455,7 @@ static int export_layers(LayerOpts *o) {
         CamPt cp = camera_at_t(&P, C, (double)f / (N > 1 ? N - 1 : 1));
         fprintf(js, "   {\"frame\": %d, \"x\": %.4f, \"y\": %.4f, \"rotation\": %.5f, \"zoom\": %.6f}%s\n", f, cp.x, cp.y, cp.rot, cp.zoom, i + 1 < nfr ? "," : "");
     }
-    fprintf(js, "  ]\n },\n \"layer_order\": \"du haut vers le bas, comme dans TVPaint ; composer en partant du dernier\",\n \"layers\": [\n");
+    fprintf(js, "  ]\n },\n \"layer_order\": \"top to bottom, as in TVPaint; composite starting from the last one\",\n \"layers\": [\n");
     for (int j = 0; j < nsel; j++) {
         LayerJob *J = &jobs[j]; const Layer *L = &C->layers[J->idx];
         fprintf(js, "  {\n   \"index\": %d,\n   \"name\": ", J->idx + 1); json_str(js, L->name);
@@ -1495,7 +1498,7 @@ static int export_layers(LayerOpts *o) {
     fclose(js);
     const char *jb = jpath + strlen(jpath);
     while (jb > jpath && jb[-1] != '/' && jb[-1] != '\\') jb--;
-    printf("%s écrit — %ld s\n", jb, (long)(time(NULL) - w_start));
+    printf("%s written — %ld s\n", jb, (long)(time(NULL) - w_start));
     return 0;
 }
 
@@ -1508,25 +1511,25 @@ static int bytes_save(const char *path, const Bytes *b) {
 
 static void usage(void) {
     fprintf(stderr,
-        "tvpp " TVPP_VERSION " — lecture et rendu de fichiers TVPaint 11 (.tvpp) sans TVPaint\n\n"
-        "  tvpp info   fichier.tvpp [--json]\n"
-        "  tvpp render fichier.tvpp dossier [options]\n\n"
-        "options de render :\n"
-        "  --clip N            clip à rendre (1)\n"
-        "  --frames A-B        plage (défaut : marques in/out, sinon tout le contenu visible)\n"
-        "  --bg MODE           projet (défaut) | transparent | #RRGGBB\n"
-        "  --scale S           échelle de sortie (ex. 0.5 pour une preview)\n"
-        "  --blur-samples N    échantillons du flou de mouvement (8)\n"
-        "  --threads N         nombre de threads (défaut : tous les cœurs)\n"
-        "  --prefix NOM        préfixe des images (défaut : nom du clip)\n\n"
-        "export calque par calque (images en alpha droit, feuille entière, + JSON) :\n"
-        "  --layers [LISTE]    tous les calques visibles, ou « nom,nom,3 » (numéros de tvpp info)\n"
-        "  --keyframes         une image par dessin + JSON d'exposition (sinon toutes les frames)\n"
-        "  --camera            toutes les frames, calques cadrés par la caméra\n"
-        "  --include-hidden    inclure les calques masqués\n"
-        "  --skip-empty        pas d'image transparente quand le calque est vide\n"
-        "  --png-level N       compression PNG 0-12 (défaut 6)\n"
-        "  --json NOM          nom du fichier JSON\n");
+        "opentvp " OPENTVP_VERSION " — reading and rendering TVPaint 11 files (.tvpp) without TVPaint\n\n"
+        "  opentvp info   file.tvpp [--json]\n"
+        "  opentvp render file.tvpp folder [options]\n\n"
+        "render options:\n"
+        "  --clip N            clip to render (1)\n"
+        "  --frames A-B        range, from 0 (default: in/out marks, otherwise all visible content)\n"
+        "  --bg MODE           project (default) | transparent | #RRGGBB\n"
+        "  --scale S           output scale (e.g. 0.5 for a preview)\n"
+        "  --blur-samples N    motion blur samples (8)\n"
+        "  --threads N         number of threads (default: all cores)\n"
+        "  --prefix NAME       image prefix (default: clip name)\n\n"
+        "layer-by-layer export (straight alpha images, whole canvas, + JSON):\n"
+        "  --layers [LIST]     all visible layers, or \"name,name,3\" (numbers from opentvp info)\n"
+        "  --keyframes         one image per drawing + exposure JSON (otherwise every frame)\n"
+        "  --camera            every frame, layers framed by the camera\n"
+        "  --include-hidden    include hidden layers\n"
+        "  --skip-empty        no transparent image when the layer is empty\n"
+        "  --png-level N       PNG compression 0-12 (default 6)\n"
+        "  --json NAME         JSON file name\n");
 }
 
 static void sanitize(char *s) {
@@ -1538,7 +1541,7 @@ static int cmd_render(int argc, char **argv) {
     const char *path = argv[0], *outdir = argv[1];
     int clip = 1, f0 = -1, f1 = -1, blur_samples = 8;
     double scale = 1.0;
-    const char *bgmode = "projet", *prefix = NULL;
+    const char *bgmode = "project", *prefix = NULL;
     LayerOpts lo; memset(&lo, 0, sizeof lo);
     int layer_mode = 0, png_level = -1;
     for (int i = 2; i < argc; i++) {
@@ -1556,18 +1559,18 @@ static int cmd_render(int argc, char **argv) {
         else if (!strcmp(argv[i], "--blur-samples") && i + 1 < argc) blur_samples = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--threads") && i + 1 < argc) g_threads = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--prefix") && i + 1 < argc) prefix = argv[++i];
-        else { fprintf(stderr, "option inconnue : %s\n", argv[i]); usage(); return 2; }
+        else { fprintf(stderr, "unknown option: %s\n", argv[i]); usage(); return 2; }
     }
     if (layer_mode) {
         lo.path = path; lo.outdir = outdir; lo.clip = clip; lo.f0 = f0; lo.f1 = f1;
         lo.scale = scale; lo.blur_samples = blur_samples; lo.png_level = png_level >= 0 ? png_level : 6;
         return export_layers(&lo);
     }
-    if (lo.camera) fprintf(stderr, "  (--camera ne sert qu'avec --layers : le rendu final passe toujours par la caméra)\n");
+    if (lo.camera) fprintf(stderr, "  (--camera only applies with --layers: the final render always goes through the camera)\n");
     clock_t t_start = clock();
     time_t w_start = time(NULL);
     Project P = load_project(path);
-    if (clip < 1 || clip > P.nclips) die("numéro de clip invalide");
+    if (clip < 1 || clip > P.nclips) die("invalid clip number");
     Clip *C = &P.clips[clip - 1];
     Renderer R;
     memset(&R, 0, sizeof R);
@@ -1582,7 +1585,7 @@ static int cmd_render(int argc, char **argv) {
         const Layer *L = &C->layers[i];
         int b = L->blend;
         if (L->visible && !(b == 0 || b == 1 || b == 2 || b == 7 || b == 9 || b == 10 || b == 11 || b == 12 || b == 15 || b == 17 || b == 25 || b == 26))
-            fprintf(stderr, "  ⚠ calque « %s » : mode %s non géré, rendu en normal\n", L->name, blend_name(b));
+            fprintf(stderr, "  ⚠ layer \"%s\": unsupported mode %s, rendered as normal\n", L->name, blend_name(b));
     }
     int N = C->visible_frames;
     if (f0 < 0) {
@@ -1597,16 +1600,16 @@ static int cmd_render(int argc, char **argv) {
         unsigned r, g, b; sscanf(bgmode + 1, "%2x%2x%2x", &r, &g, &b);
         bg[0] = r / 255.f; bg[1] = g / 255.f; bg[2] = b / 255.f;
     } else if (C->has_bg) {
-        /* BGP1 / BGP2 : octets dans l'ordre R G B A */
+        /* BGP1 / BGP2: bytes in R G B A order */
         bg[0] = C->bg1[0] / 255.f; bg[1] = C->bg1[1] / 255.f; bg[2] = C->bg1[2] / 255.f;
         if (memcmp(C->bg1, C->bg2, 3) != 0)
-            fprintf(stderr, "  ⚠ fond du projet en deux couleurs (damier probable) : rendu sur la première\n");
+            fprintf(stderr, "  ⚠ two-colour project background (probably a checkerboard): rendered on the first one\n");
     }
     MKDIR(outdir);
     char pre[512];
     snprintf(pre, sizeof pre, "%s", prefix ? prefix : C->name);
     sanitize(pre);
-    printf("%s — clip « %s » — frames %d à %d — sortie %dx%d%s\n", path, C->name, f0, f1, R.ow, R.oh, C->blur > 0 ? " — flou de mouvement" : "");
+    printf("%s — clip \"%s\" — frames %d to %d — output %dx%d%s\n", path, C->name, f0, f1, R.ow, R.oh, C->blur > 0 ? " — motion blur" : "");
     g_png_level = png_level >= 0 ? png_level : 6;
     float *acc = xmalloc(sizeof(float) * 4 * (size_t)R.ow * R.oh);
     float *cover = xmalloc(sizeof(float) * (size_t)R.ow * R.oh);
@@ -1614,18 +1617,18 @@ static int cmd_render(int argc, char **argv) {
     for (int f = f0; f <= f1; f++) {
         render_frame(&R, f, acc, cover);
         snprintf(fn, sizeof fn, "%s/%s_%04d.png", outdir, pre, f);
-        if (!write_png(fn, acc, cover, R.ow, R.oh, mode, bg)) { fprintf(stderr, "erreur d'écriture : %s\n", fn); return 1; }
+        if (!write_png(fn, acc, cover, R.ow, R.oh, mode, bg)) { fprintf(stderr, "write error: %s\n", fn); return 1; }
         printf("\r  frame %d", f); fflush(stdout);
     }
     (void)t_start;
-    printf("\n%d images en %ld s\n", f1 - f0 + 1, (long)(time(NULL) - w_start));
+    printf("\n%d images in %ld s\n", f1 - f0 + 1, (long)(time(NULL) - w_start));
     return 0;
 }
 
 int main(int argc, char **argv) {
 #ifdef _WIN32
     SetConsoleOutputCP(65001);
-    {   /* arguments en UTF-8 (chemins avec accents) */
+    {   /* arguments as UTF-8 (paths with accents) */
         int wc; wchar_t **wv = CommandLineToArgvW(GetCommandLineW(), &wc);
         if (wv) {
             argv = malloc(sizeof(char *) * (wc + 1)); argc = wc;
@@ -1637,7 +1640,7 @@ int main(int argc, char **argv) {
         }
     }
 #endif
-    if (argc >= 2 && (!strcmp(argv[1], "--version") || !strcmp(argv[1], "version"))) { printf("tvpp %s\n", TVPP_VERSION); return 0; }
+    if (argc >= 2 && (!strcmp(argv[1], "--version") || !strcmp(argv[1], "version"))) { printf("opentvp %s\n", OPENTVP_VERSION); return 0; }
     if (argc < 3) { usage(); return 2; }
     if (!strcmp(argv[1], "info")) return cmd_info(argv[2], argc > 3 && !strcmp(argv[3], "--json"));
     if (!strcmp(argv[1], "render")) return cmd_render(argc - 2, argv + 2);

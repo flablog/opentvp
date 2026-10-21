@@ -1,0 +1,10 @@
+# LF line endings everywhere (sh scripts do not run with CRLF), whatever core.autocrlf says
+* text=auto eol=lf
+*.bat text eol=crlf
+# ground truth written by TVPaint (CRLF): kept as is
+*_gt.csv -text
+# binary files: never converted
+*.tvpp binary
+*.png binary
+*.jpg binary
+*.exe binary
