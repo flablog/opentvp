@@ -1,0 +1,542 @@
+// ============================================================
+// make_tvpp_cam4.grg — corpus caméra, 4e passe : loi de timing
+// Pour chaque cas : on place les points de caméra, puis on demande à TVPaint
+// la caméra interpolée (tv_CameraInterpolation) à 49 positions entre 0 et 1.
+// Les réponses sont rangées DANS le projet (tv_WriteProjectString, section
+// « camtest ») : un seul fichier .tvpp à renvoyer, aucun rendu.
+// Points : y = 144, x = 64 + cumul des longueurs (unité 32 px).
+// Nom de cas S3_102 = trois segments de longueurs 1, 0, 2.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+ppath = CONCAT(base, "/L01_camera_timing.tvpp")
+tv_ProjectNew ppath 512 288 1.0 24 "none" 0
+tv_CameraInfo 256 144
+tv_WriteProjectString "camtest" "ncases" "60"
+// diagnostics : écriture avec variables, puis une interpolation brute
+dk = "diag_variables"
+dv = "ok"
+tv_WriteProjectString "camtest" dk dv
+tv_CameraInsertPoint 0 100 100 0 1
+tv_CameraInsertPoint 1 200 100 0 1
+tv_CameraInterpolation 0.5
+PARSE result d1 d2 d3 d4
+tv_WriteProjectString "camtest" "diag_x" d1
+tv_WriteProjectString "camtest" "diag_zoom" d4
+ClearPoints(2)
+
+// V_M01
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Sample("V_M01")
+ClearPoints(4)
+
+// V_M02
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 256 144 0 1
+tv_CameraInsertPoint 2 256 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Sample("V_M02")
+ClearPoints(4)
+
+// V_M03
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 256 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Sample("V_M03")
+ClearPoints(4)
+
+// V_M04
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 256 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Sample("V_M04")
+ClearPoints(4)
+
+// V_M05
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 256 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+Sample("V_M05")
+ClearPoints(3)
+
+// V_M07
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+tv_CameraInsertPoint 4 352 144 0 1
+Sample("V_M07")
+ClearPoints(5)
+
+// S2_11
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+Sample("S2_11")
+ClearPoints(3)
+
+// S2_12
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+Sample("S2_12")
+ClearPoints(3)
+
+// S2_21
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+Sample("S2_21")
+ClearPoints(3)
+
+// S2_13
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 192 144 0 1
+Sample("S2_13")
+ClearPoints(3)
+
+// S2_31
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 192 144 0 1
+Sample("S2_31")
+ClearPoints(3)
+
+// S2_10
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+Sample("S2_10")
+ClearPoints(3)
+
+// S2_01
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+Sample("S2_01")
+ClearPoints(3)
+
+// S2_22
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 192 144 0 1
+Sample("S2_22")
+ClearPoints(3)
+
+// S2_14
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 224 144 0 1
+Sample("S2_14")
+ClearPoints(3)
+
+// S3_001
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 64 144 0 1
+tv_CameraInsertPoint 3 96 144 0 1
+Sample("S3_001")
+ClearPoints(4)
+
+// S3_002
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 64 144 0 1
+tv_CameraInsertPoint 3 128 144 0 1
+Sample("S3_002")
+ClearPoints(4)
+
+// S3_010
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 96 144 0 1
+Sample("S3_010")
+ClearPoints(4)
+
+// S3_011
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 128 144 0 1
+Sample("S3_011")
+ClearPoints(4)
+
+// S3_012
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 160 144 0 1
+Sample("S3_012")
+ClearPoints(4)
+
+// S3_020
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 128 144 0 1
+Sample("S3_020")
+ClearPoints(4)
+
+// S3_021
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 160 144 0 1
+Sample("S3_021")
+ClearPoints(4)
+
+// S3_022
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 192 144 0 1
+Sample("S3_022")
+ClearPoints(4)
+
+// S3_100
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 96 144 0 1
+Sample("S3_100")
+ClearPoints(4)
+
+// S3_101
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 128 144 0 1
+Sample("S3_101")
+ClearPoints(4)
+
+// S3_102
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 160 144 0 1
+Sample("S3_102")
+ClearPoints(4)
+
+// S3_110
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 128 144 0 1
+Sample("S3_110")
+ClearPoints(4)
+
+// S3_111
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 160 144 0 1
+Sample("S3_111")
+ClearPoints(4)
+
+// S3_112
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 192 144 0 1
+Sample("S3_112")
+ClearPoints(4)
+
+// S3_120
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 160 144 0 1
+Sample("S3_120")
+ClearPoints(4)
+
+// S3_121
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 192 144 0 1
+Sample("S3_121")
+ClearPoints(4)
+
+// S3_122
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 224 144 0 1
+Sample("S3_122")
+ClearPoints(4)
+
+// S3_200
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 128 144 0 1
+Sample("S3_200")
+ClearPoints(4)
+
+// S3_201
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 160 144 0 1
+Sample("S3_201")
+ClearPoints(4)
+
+// S3_202
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 192 144 0 1
+Sample("S3_202")
+ClearPoints(4)
+
+// S3_210
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 160 144 0 1
+Sample("S3_210")
+ClearPoints(4)
+
+// S3_211
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 192 144 0 1
+Sample("S3_211")
+ClearPoints(4)
+
+// S3_212
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 224 144 0 1
+Sample("S3_212")
+ClearPoints(4)
+
+// S3_220
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 192 144 0 1
+tv_CameraInsertPoint 3 192 144 0 1
+Sample("S3_220")
+ClearPoints(4)
+
+// S3_221
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 192 144 0 1
+tv_CameraInsertPoint 3 224 144 0 1
+Sample("S3_221")
+ClearPoints(4)
+
+// S3_222
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 192 144 0 1
+tv_CameraInsertPoint 3 256 144 0 1
+Sample("S3_222")
+ClearPoints(4)
+
+// S4_1111
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 160 144 0 1
+tv_CameraInsertPoint 4 192 144 0 1
+Sample("S4_1111")
+ClearPoints(5)
+
+// S4_1234
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 256 144 0 1
+tv_CameraInsertPoint 4 384 144 0 1
+Sample("S4_1234")
+ClearPoints(5)
+
+// S4_4321
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 192 144 0 1
+tv_CameraInsertPoint 2 288 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+tv_CameraInsertPoint 4 384 144 0 1
+Sample("S4_4321")
+ClearPoints(5)
+
+// S4_0110
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 128 144 0 1
+tv_CameraInsertPoint 4 128 144 0 1
+Sample("S4_0110")
+ClearPoints(5)
+
+// S4_1001
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 96 144 0 1
+tv_CameraInsertPoint 4 128 144 0 1
+Sample("S4_1001")
+ClearPoints(5)
+
+// S4_0010
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 64 144 0 1
+tv_CameraInsertPoint 3 96 144 0 1
+tv_CameraInsertPoint 4 96 144 0 1
+Sample("S4_0010")
+ClearPoints(5)
+
+// S4_0100
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 96 144 0 1
+tv_CameraInsertPoint 4 96 144 0 1
+Sample("S4_0100")
+ClearPoints(5)
+
+// S4_1100
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 128 144 0 1
+tv_CameraInsertPoint 4 128 144 0 1
+Sample("S4_1100")
+ClearPoints(5)
+
+// S4_0011
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 64 144 0 1
+tv_CameraInsertPoint 3 96 144 0 1
+tv_CameraInsertPoint 4 128 144 0 1
+Sample("S4_0011")
+ClearPoints(5)
+
+// S4_2111
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 128 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 192 144 0 1
+tv_CameraInsertPoint 4 224 144 0 1
+Sample("S4_2111")
+ClearPoints(5)
+
+// S4_1112
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 0 1
+tv_CameraInsertPoint 3 160 144 0 1
+tv_CameraInsertPoint 4 224 144 0 1
+Sample("S4_1112")
+ClearPoints(5)
+
+// S4_1010
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 128 144 0 1
+tv_CameraInsertPoint 4 128 144 0 1
+Sample("S4_1010")
+ClearPoints(5)
+
+// S4_0101
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 1
+tv_CameraInsertPoint 2 96 144 0 1
+tv_CameraInsertPoint 3 96 144 0 1
+tv_CameraInsertPoint 4 128 144 0 1
+Sample("S4_0101")
+ClearPoints(5)
+
+// Z_xy1_zoomonly
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 96 144 0 2
+Sample("Z_xy1_zoomonly")
+ClearPoints(3)
+
+// Z_zoomonly_xy1
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 0 2
+tv_CameraInsertPoint 2 96 144 0 2
+Sample("Z_zoomonly_xy1")
+ClearPoints(3)
+
+// Z_zoom12_xy1
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 0 2
+Sample("Z_zoom12_xy1")
+ClearPoints(3)
+
+// Z_rotonly_xy1
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 64 144 30 1
+tv_CameraInsertPoint 2 96 144 30 1
+Sample("Z_rotonly_xy1")
+ClearPoints(3)
+
+// Z_xy1_rot30
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 30 1
+Sample("Z_xy1_rot30")
+ClearPoints(3)
+
+// Z_xy1_zoom14
+tv_CameraInsertPoint 0 64 144 0 1
+tv_CameraInsertPoint 1 96 144 0 1
+tv_CameraInsertPoint 2 128 144 0 4
+Sample("Z_xy1_zoom14")
+ClearPoints(3)
+
+tv_UpdateUndo
+tv_SaveProject ppath
+tv_ProjectClose
+tv_Warn "Corpus caméra 4 terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+// 49 échantillons de tv_CameraInterpolation, écrits dans le projet
+FUNCTION Sample(cname)
+	LOCAL s u key px py pa pz
+	FOR s = 0 TO 48
+		u = s / 48.0
+		tv_CameraInterpolation u
+		PARSE result px py pa pz
+		// une clé par composante, valeurs sans séparateur (les virgules
+		// cassent les écritures)
+		key = CONCAT(cname, "_x")
+		key = CONCAT(key, s)
+		tv_WriteProjectString "camtest" key px
+		key = CONCAT(cname, "_a")
+		key = CONCAT(key, s)
+		tv_WriteProjectString "camtest" key pa
+		key = CONCAT(cname, "_z")
+		key = CONCAT(key, s)
+		tv_WriteProjectString "camtest" key pz
+	END
+END
+
+// Supprime les n points de caméra (toujours l'index 0)
+FUNCTION ClearPoints(n)
+	LOCAL k
+	FOR k = 1 TO n
+		tv_CameraRemovePoint 0
+	END
+END

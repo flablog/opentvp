@@ -1,0 +1,195 @@
+// ============================================================
+// make_tvpp_cam3.grg — corpus caméra, 3e passe
+// Nouveauté : un calque « compteur » (petits carrés entre ceux de la grille)
+// dont la couleur change à chaque frame (rouge = 5 x frame, vert = 255 - 5 x frame) :
+// chaque image rendue dit elle-même à quelle frame du clip elle correspond.
+// Positions : A = 160, B = 256, C = 352 (y = 144). Zoom 1 sauf indication.
+// Les cas avec marques in/out sont à la fin (syntaxe tv_MarkIn non vérifiée).
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+// M01_AABB : A A B B (= K04, avec compteur de frames)
+Setup(base, "M01_AABB", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Finish(base, "M01_AABB")
+
+// M02_ABBC : doublon AU MILIEU
+Setup(base, "M02_ABBC", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 256 144 0 1
+tv_CameraInsertPoint 2 256 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Finish(base, "M02_ABBC")
+
+// M03_AABC : doublon au début, 3 positions
+Setup(base, "M03_AABC", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 256 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Finish(base, "M03_AABC")
+
+// M04_ABCC : doublon à la fin, 3 positions
+Setup(base, "M04_ABCC", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 256 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Finish(base, "M04_ABCC")
+
+// M05_ABC : témoin : 3 positions à égale distance
+Setup(base, "M05_ABC", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 256 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+Finish(base, "M05_ABC")
+
+// M06_AB_zoomB_C : segment « zoom seul » au milieu
+Setup(base, "M06_AB_zoomB_C", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 256 144 0 1
+tv_CameraInsertPoint 2 256 144 0 2
+tv_CameraInsertPoint 3 352 144 0 2
+Finish(base, "M06_AB_zoomB_C")
+
+// M07_AAABB : 3 A puis 2 B
+Setup(base, "M07_AAABB", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+tv_CameraInsertPoint 4 352 144 0 1
+Finish(base, "M07_AAABB")
+
+// M08_AB_marks : A B avec marques in 5 / out 19
+Setup(base, "M08_AB_marks", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 352 144 0 1
+tv_MarkIn 5 "set"
+tv_MarkOut 19 "set"
+Finish(base, "M08_AB_marks")
+
+// M09_AABB_marks : A A B B avec marques in 5 / out 19
+Setup(base, "M09_AABB_marks", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+tv_MarkIn 5 "set"
+tv_MarkOut 19 "set"
+Finish(base, "M09_AABB_marks")
+
+// ---------- Rendu à travers la caméra (frames 0 à 24, marques ignorées) ----------
+Render(base, "M01_AABB", "aabb", 25)
+Render(base, "M02_ABBC", "abbc", 25)
+Render(base, "M03_AABC", "aabc", 25)
+Render(base, "M04_ABCC", "abcc", 25)
+Render(base, "M05_ABC", "abc", 25)
+Render(base, "M06_AB_zoomB_C", "abzoombc", 25)
+Render(base, "M07_AAABB", "aaabb", 25)
+Render(base, "M08_AB_marks", "abmarks", 25)
+Render(base, "M09_AABB_marks", "aabbmarks", 25)
+
+tv_Warn "Corpus caméra 3 terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+// Projet + caméra 256x144 + grille de calibration + compteur de frames
+// (la grille est sur le calque d'animation d'origine, tenu nf frames ;
+//  le compteur est un 2e calque d'animation, PLACÉ DESSOUS : de petits carrés
+//  de 4 px entre les carrés de la grille, sans jamais les recouvrir)
+FUNCTION Setup(pbase, pname, nf)
+	LOCAL ppath lid i r g last
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath 512 288 1.0 24 "none" 0
+	tv_CameraInfo 256 144
+	tv_LayerCurrentID
+	lid = result
+	tv_LayerRename lid "calibration"
+	Grid()
+	last = nf - 1
+	tv_ExposureAdd 0 last
+	// compteur
+	tv_LayerCreate "compteur"
+	lid = result
+	tv_LayerSet lid
+	tv_LayerAnim lid
+	FOR i = 0 TO last
+		IF (i > 0)
+			tv_LayerInsertImage 1 "after"
+			tv_LayerImage i
+		END
+		r = i * 5
+		g = 255 - i * 5
+		Dots(r, g)
+	END
+END
+
+// Petits carrés de 4 px à mi-chemin entre les carrés de la grille
+FUNCTION Dots(r, g)
+	LOCAL i j x y x2 y2
+	tv_SetAPen r g 0
+	FOR i = 0 TO 7
+		FOR j = 0 TO 5
+			x = 60 + i * 64
+			y = 44 + j * 48
+			x2 = x + 3
+			y2 = y + 3
+			tv_RectFill x y x2 y2
+		END
+	END
+END
+
+FUNCTION Finish(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+FUNCTION Render(pbase, pname, word, nf)
+	LOCAL ppath out last
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	out = CONCAT(pbase, "/render_")
+	out = CONCAT(out, word)
+	out = CONCAT(out, "_0000.png")
+	tv_LoadProject ppath
+	last = nf - 1
+	tv_ProjectSaveSequence out "camera" 0 last
+	tv_ProjectClose
+END
+
+// Grille 8 colonnes x 6 lignes, pas de 64 px, carrés de 8 px
+// couleur = (32 + 28*colonne, 32 + 36*ligne, 200)
+FUNCTION Grid()
+	LOCAL i j x y r g x2 y2
+	FOR i = 0 TO 7
+		FOR j = 0 TO 5
+			x = 28 + i * 64
+			y = 20 + j * 48
+			x2 = x + 7
+			y2 = y + 7
+			r = 32 + i * 28
+			g = 32 + j * 36
+			tv_SetAPen r g 200
+			tv_RectFill x y x2 y2
+		END
+	END
+END

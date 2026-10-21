@@ -1,0 +1,21 @@
+UTF-8, TVPaint, "CSV 1.1"
+Project Name, Width, Height, Frame Count, Layer Count, Frame Rate, Pixel Aspect Ratio, Field Mode
+"Clip_001", 64, 64, 12, 2, 24.000000, 1.000000, Progressive
+
+#Layers,"anim","duree"
+#Folder,"C:\projets\nebuleuse\TECH\test_tvpp\sorties6\Q01_pre_repeat_gt.layers\[001] anim","C:\projets\nebuleuse\TECH\test_tvpp\sorties6\Q01_pre_repeat_gt.layers\[002] duree"
+#Density,1.000000,1.000000
+#Blending,"Color", "Color"
+#Visible,1, 1
+#00000, "[001][00000] anim.png", "[002][00000] duree.png"
+#00001, "[001][00001] anim.png",
+#00002, "[001][00002] anim.png",
+#00003, "[001][00003] anim.png",
+#00004, "[001][00004] anim.png",
+#00005, "[001][00005] anim.png",
+#00006, "[001][00006] anim.png",
+#00007, "[001][00007] anim.png",
+#00008, "[001][00008] anim.png",
+#00009, "[001][00009] anim.png",
+#00010, "[001][00010] anim.png",
+#00011, "[001][00011] anim.png",

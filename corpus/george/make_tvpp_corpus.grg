@@ -1,0 +1,167 @@
+// ============================================================
+// make_tvpp_corpus.grg
+// Génère un corpus de fichiers .tvpp minimaux pour l'analyse du format.
+// Règle : chaque fichier ne diffère de sa référence que par UN paramètre.
+// Pour chaque .tvpp, une vérité terrain est exportée à côté (CSV + images).
+//
+// Structure George : programme principal d'abord (d'un seul bloc),
+// fonctions ensuite, en fin de fichier.
+// ============================================================
+
+// ---------- Paramètres ----------
+base = "C:/tvpp_corpus"     // dossier de sortie (doit exister)
+W = 64
+H = 64
+FPS = 24
+
+// ============================================================
+// GROUPE A — Base
+// ============================================================
+
+// A01 : projet vide (référence absolue)
+NewProj(base, "A01_empty", W, H, FPS)
+SaveAndClose(base, "A01_empty")
+
+// A02 : vide, sauvé une 2e fois à l'identique (détecte timestamps / octets variables)
+NewProj(base, "A02_empty_again", W, H, FPS)
+SaveAndClose(base, "A02_empty_again")
+
+// A03 : un carré rouge 16x16 en (8,8)
+NewProj(base, "A03_red_square", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+SaveAndClose(base, "A03_red_square")
+
+// ============================================================
+// GROUPE B — Variations pixel (référence : A03)
+// ============================================================
+
+// B01 : même carré, couleur verte -> isole l'encodage couleur
+NewProj(base, "B01_green_square", W, H, FPS)
+Square(8, 8, 16, 0, 255, 0)
+SaveAndClose(base, "B01_green_square")
+
+// B02 : même carré rouge décalé de 8 px en X -> isole la position
+NewProj(base, "B02_red_square_moved", W, H, FPS)
+Square(16, 8, 16, 255, 0, 0)
+SaveAndClose(base, "B02_red_square_moved")
+
+// B03 : carré rouge plus grand -> taille des données vs surface peinte
+NewProj(base, "B03_red_square_big", W, H, FPS)
+Square(8, 8, 32, 255, 0, 0)
+SaveAndClose(base, "B03_red_square_big")
+
+// B04 : image entièrement remplie -> cas « plein » (compression ?)
+NewProj(base, "B04_full_red", W, H, FPS)
+Square(0, 0, 63, 255, 0, 0)
+SaveAndClose(base, "B04_full_red")
+
+// ============================================================
+// GROUPE C — Projet (référence : A03)
+// ============================================================
+
+// C01 : résolution 128x64 -> champs largeur/hauteur
+NewProj(base, "C01_res_128x64", 128, 64, FPS)
+Square(8, 8, 16, 255, 0, 0)
+SaveAndClose(base, "C01_res_128x64")
+
+// C02 : 25 i/s -> champ framerate
+NewProj(base, "C02_fps_25", W, H, 25)
+Square(8, 8, 16, 255, 0, 0)
+SaveAndClose(base, "C02_fps_25")
+
+// ============================================================
+// GROUPE D — Calques (référence : A03)
+// ============================================================
+
+// D01 : calque renommé -> stockage des chaînes
+NewProj(base, "D01_layer_renamed", W, H, FPS)
+tv_LayerCurrentID
+lid = result
+tv_LayerRename lid "LAYER_NAME_MARKER"
+Square(8, 8, 16, 255, 0, 0)
+SaveAndClose(base, "D01_layer_renamed")
+
+// D02 : deux calques (rouge en dessous, bleu au-dessus)
+NewProj(base, "D02_two_layers", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerCreate "second"
+lid2 = result
+tv_LayerSet lid2
+Square(32, 32, 16, 0, 0, 255)
+SaveAndClose(base, "D02_two_layers")
+
+// D03 : opacité (density) du calque à 50 %
+NewProj(base, "D03_density_50", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerDensity 50
+SaveAndClose(base, "D03_density_50")
+
+// D04 : mode de fusion Multiply
+NewProj(base, "D04_blend_multiply", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerBlendingMode "multiply"
+SaveAndClose(base, "D04_blend_multiply")
+
+// ============================================================
+// GROUPE E — Timing (référence : A03)
+// ============================================================
+
+// E01 : deux images (rouge puis vert) -> structure multi-images
+NewProj(base, "E01_two_images", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerInsertImage 1 "after"
+tv_LayerImage 1
+Square(8, 8, 16, 0, 255, 0)
+SaveAndClose(base, "E01_two_images")
+
+// E02 : trois images identiques -> déduplication / instances ?
+NewProj(base, "E02_three_same", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerInsertImage 1 "after"
+tv_LayerImage 1
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerInsertImage 1 "after"
+tv_LayerImage 2
+Square(8, 8, 16, 255, 0, 0)
+SaveAndClose(base, "E02_three_same")
+
+tv_Warn "Corpus terminé"
+
+// ============================================================
+// FONCTIONS (après le programme principal)
+// ============================================================
+
+// Crée un projet vierge
+FUNCTION NewProj(pbase, pname, pw, ph, pfps)
+	LOCAL ppath
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath pw ph 1.0 pfps "none" 0
+END
+
+// Sauve le projet + exporte la vérité terrain, puis ferme
+FUNCTION SaveAndClose(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	// Force la validation du dernier tracé : sans ça, le dernier dessin
+	// avant la sauvegarde n'est pas écrit (constaté sur le 1er corpus).
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+// Dessine un carré plein de couleur r,g,b sur l'image courante
+FUNCTION Square(x, y, s, r, g, b)
+	LOCAL x2 y2
+	x2 = x + s
+	y2 = y + s
+	tv_SetAPen r g b
+	tv_RectFill x y x2 y2
+END

@@ -1,0 +1,54 @@
+// ============================================================
+// make_tvpp_ctg_gt.grg — vérité terrain des fichiers CTG faits à la main
+// Pour chaque fichier : rouvre le .tvpp, exporte la structure CSV
+// (un PNG par calque et par image), puis referme sans sauver.
+// Partie 2 (expérimentale, en fin de script) : rendu aplati en PNG,
+// pour voir le remplissage CTG tel que TVPaint le calcule.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+// ---------- Partie 1 : structure CSV ----------
+GroundTruth(base, "C01_ctg_one")
+GroundTruth(base, "C02_ctg_two")
+GroundTruth(base, "C03_ctg_gap")
+GroundTruth(base, "C04_ctg_lines_edited")
+GroundTruth(base, "C05_ctg_anim")
+GroundTruth(base, "C06_ctg_baked")
+
+// ---------- Partie 2 : rendu aplati (expérimental) ----------
+Render(base, "C01_ctg_one")
+Render(base, "C02_ctg_two")
+Render(base, "C03_ctg_gap")
+Render(base, "C04_ctg_lines_edited")
+Render(base, "C05_ctg_anim")
+Render(base, "C06_ctg_baked")
+
+tv_Warn "Vérité terrain CTG terminée"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+FUNCTION GroundTruth(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_LoadProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+FUNCTION Render(pbase, pname)
+	LOCAL ppath out
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	out = CONCAT(ppath, "_render.png")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_LoadProject ppath
+	tv_SaveMode "PNG"
+	tv_SaveSequence out
+	tv_ProjectClose
+END

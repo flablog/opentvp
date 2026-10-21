@@ -1,0 +1,123 @@
+// ============================================================
+// make_tvpp_cam6.grg — correspondance frame -> position caméra selon la durée
+// Chemin A (160,144) -> B (352,144) partout ; seule la durée du plan change
+// (et la cadence pour les 3 derniers). Pas de compteur : sans marques, le
+// fichier rendu n°k correspond à la frame k-1 (le n°0 est un rendu en plus).
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+Setup(base, "N010_fps24", 10, 24)
+Finish(base, "N010_fps24")
+Setup(base, "N024_fps24", 24, 24)
+Finish(base, "N024_fps24")
+Setup(base, "N025_fps24", 25, 24)
+Finish(base, "N025_fps24")
+Setup(base, "N026_fps24", 26, 24)
+Finish(base, "N026_fps24")
+Setup(base, "N048_fps24", 48, 24)
+Finish(base, "N048_fps24")
+Setup(base, "N049_fps24", 49, 24)
+Finish(base, "N049_fps24")
+Setup(base, "N050_fps24", 50, 24)
+Finish(base, "N050_fps24")
+Setup(base, "N051_fps24", 51, 24)
+Finish(base, "N051_fps24")
+Setup(base, "N075_fps24", 75, 24)
+Finish(base, "N075_fps24")
+Setup(base, "N100_fps24", 100, 24)
+Finish(base, "N100_fps24")
+Setup(base, "N117_fps24", 117, 24)
+Finish(base, "N117_fps24")
+Setup(base, "N120_fps24", 120, 24)
+Finish(base, "N120_fps24")
+Setup(base, "N050_fps25", 50, 25)
+Finish(base, "N050_fps25")
+Setup(base, "N117_fps25", 117, 25)
+Finish(base, "N117_fps25")
+Setup(base, "N120_fps25", 120, 25)
+Finish(base, "N120_fps25")
+
+// ---------- Rendu à travers la caméra ----------
+Render(base, "N010_fps24", "ten", 10)
+Render(base, "N024_fps24", "twentyfour", 24)
+Render(base, "N025_fps24", "twentyfive", 25)
+Render(base, "N026_fps24", "twentysix", 26)
+Render(base, "N048_fps24", "fortyeight", 48)
+Render(base, "N049_fps24", "fortynine", 49)
+Render(base, "N050_fps24", "fifty", 50)
+Render(base, "N051_fps24", "fiftyone", 51)
+Render(base, "N075_fps24", "seventyfive", 75)
+Render(base, "N100_fps24", "hundred", 100)
+Render(base, "N117_fps24", "hundredseventeen", 117)
+Render(base, "N120_fps24", "hundredtwenty", 120)
+Render(base, "N050_fps25", "fiftyfps", 50)
+Render(base, "N117_fps25", "hundredseventeenfps", 117)
+Render(base, "N120_fps25", "hundredtwentyfps", 120)
+
+tv_Warn "Corpus caméra 6 terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+FUNCTION Setup(pbase, pname, nf, fps)
+	LOCAL ppath lid last
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath 512 288 1.0 fps "none" 0
+	tv_CameraInfo 256 144
+	tv_LayerCurrentID
+	lid = result
+	tv_LayerRename lid "calibration"
+	Grid()
+	last = nf - 1
+	tv_ExposureAdd 0 last
+	tv_CameraInsertPoint 0 160 144 0 1
+	tv_CameraInsertPoint 1 352 144 0 1
+END
+
+FUNCTION Finish(pbase, pname)
+	LOCAL ppath
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ProjectClose
+END
+
+FUNCTION Render(pbase, pname, word, nf)
+	LOCAL ppath out last
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	out = CONCAT(pbase, "/render_")
+	out = CONCAT(out, word)
+	out = CONCAT(out, "_0000.png")
+	tv_LoadProject ppath
+	last = nf - 1
+	tv_ProjectSaveSequence out "camera" 0 last
+	tv_ProjectClose
+END
+
+// Grille 8 colonnes x 6 lignes, pas de 64 px, carrés de 8 px
+// couleur = (32 + 28*colonne, 32 + 36*ligne, 200)
+FUNCTION Grid()
+	LOCAL i j x y r g x2 y2
+	FOR i = 0 TO 7
+		FOR j = 0 TO 5
+			x = 28 + i * 64
+			y = 20 + j * 48
+			x2 = x + 7
+			y2 = y + 7
+			r = 32 + i * 28
+			g = 32 + j * 36
+			tv_SetAPen r g 200
+			tv_RectFill x y x2 y2
+		END
+	END
+END

@@ -1,0 +1,30 @@
+// ============================================================
+// make_tvpp_cam7_render.grg — rendu à travers la caméra des fichiers P1..P5, B1
+// À lancer APRÈS avoir créé ces fichiers à la main (voir les consignes).
+// Un fichier absent fera échouer la ligne correspondante : on peut alors
+// supprimer cette ligne et relancer.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+Render(base, "P1_ease_in", "easein")
+Render(base, "P2_ease_out", "easeout")
+Render(base, "P3_ease_inout", "easeinout")
+Render(base, "P4_custom", "custom")
+Render(base, "P5_3pts_ease_inout", "threeptsease")
+Render(base, "B1_motion_blur", "motionblur")
+
+tv_Warn "Rendus terminés"
+
+FUNCTION Render(pbase, pname, word)
+	LOCAL ppath out
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	out = CONCAT(pbase, "/render_")
+	out = CONCAT(out, word)
+	out = CONCAT(out, "_0000.png")
+	tv_LoadProject ppath
+	tv_ProjectSaveSequence out "camera" 0 24
+	tv_ProjectClose
+END

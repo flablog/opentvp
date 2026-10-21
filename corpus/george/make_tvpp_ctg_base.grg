@@ -1,0 +1,100 @@
+// ============================================================
+// make_tvpp_ctg_base.grg — fichiers de base pour le corpus CTG
+// Crée les calques de lignes (sources) ; les calques CTG et les squiggles
+// sont ensuite ajoutés À LA MAIN dans TVPaint (voir les consignes).
+//
+// Dessin (128x128, traits noirs de 2 px) :
+//   boîte A : en haut à gauche, fermée
+//   boîte B : en haut à droite, fermée
+//   boîte C : en bas, avec une ouverture de 4 px dans le bord du haut
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+// ---------- C00a : lignes fixes, une image ----------
+NewProj(base, "C00a_lines_static")
+RenameCurrent("lines")
+Boxes(0)
+SaveAndClose(base, "C00a_lines_static")
+
+// ---------- C00b : lignes animées, 3 images (boîte A glisse de 8 px) ----------
+NewProj(base, "C00b_lines_anim")
+RenameCurrent("lines")
+Boxes(0)
+NextImage(1)
+Boxes(8)
+NextImage(2)
+Boxes(16)
+SaveAndClose(base, "C00b_lines_anim")
+
+tv_Warn "Bases CTG terminées"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+FUNCTION NewProj(pbase, pname)
+	LOCAL ppath
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath 128 128 1.0 24 "none" 0
+END
+
+FUNCTION SaveAndClose(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+FUNCTION RenameCurrent(lname)
+	LOCAL lid
+	tv_LayerCurrentID
+	lid = result
+	tv_LayerRename lid lname
+END
+
+FUNCTION NextImage(idx)
+	tv_LayerInsertImage 1 "after"
+	tv_LayerImage idx
+END
+
+// Rectangle plein (x1,y1)-(x2,y2) en noir
+FUNCTION Bar(x1, y1, x2, y2)
+	tv_SetAPen 0 0 0
+	tv_RectFill x1 y1 x2 y2
+END
+
+// Contour de 2 px
+FUNCTION Box(x1, y1, x2, y2)
+	LOCAL a b
+	a = x2 - 1
+	b = y2 - 1
+	Bar(x1, y1, x2, y1 + 1)
+	Bar(x1, b, x2, y2)
+	Bar(x1, y1, x1 + 1, y2)
+	Bar(a, y1, x2, y2)
+END
+
+// Les trois boîtes ; dx décale la boîte A
+FUNCTION Boxes(dx)
+	LOCAL ax1 ax2
+	ax1 = 8 + dx
+	ax2 = 48 + dx
+	Box(ax1, 8, ax2, 56)
+	Box(72, 8, 120, 56)
+	// boîte C : bord du haut en deux morceaux, ouverture de 4 px au milieu
+	Bar(8, 72, 61, 73)
+	Bar(66, 72, 120, 73)
+	Bar(8, 118, 120, 119)
+	Bar(8, 72, 9, 119)
+	Bar(119, 72, 120, 119)
+END

@@ -1,0 +1,10 @@
+UTF-8, TVPaint, "CSV 1.1"
+Project Name, Width, Height, Frame Count, Layer Count, Frame Rate, Pixel Aspect Ratio, Field Mode
+"Clip_001", 64, 64, 1, 1, 24.000000, 1.000000, Progressive
+
+#Layers,"LAYER_NAME_MARKER"
+#Folder,"C:\projets\nebuleuse\TECH\test_tvpp\sorties2\D01_layer_renamed_gt.layers\[001] LAYER_NAME_MARKER"
+#Density,1.000000
+#Blending,"Color"
+#Visible,1
+#00000, "[001][00000] LAYER_NAME_MARKER.png"

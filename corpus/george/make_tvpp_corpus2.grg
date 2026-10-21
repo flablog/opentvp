@@ -1,0 +1,198 @@
+// ============================================================
+// make_tvpp_corpus2.grg — corpus complémentaire
+// Cible : images suivantes (SRAW), grandes tailles, calques, modes.
+// Même principe : un paramètre change à la fois, vérité terrain à côté.
+// Programme principal d'abord, fonctions en fin de fichier.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"    // dossier de sortie
+W = 64
+H = 64
+FPS = 24
+
+// ============================================================
+// GROUPE F — Images suivantes (SRAW). Référence : E01
+// ============================================================
+
+// F01 : 3 images toutes différentes (rouge, vert, bleu, même position)
+NewProj(base, "F01_three_different", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+Square(8, 8, 16, 0, 255, 0)
+NextImage(2)
+Square(8, 8, 16, 0, 0, 255)
+SaveAndClose(base, "F01_three_different")
+
+// F02 : image 2 = image 1 + un seul pixel bleu en (40,40)
+NewProj(base, "F02_one_pixel_change", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+Square(8, 8, 16, 255, 0, 0)
+Dot(40, 40, 0, 0, 255)
+SaveAndClose(base, "F02_one_pixel_change")
+
+// F03 : image 2 vide
+NewProj(base, "F03_second_empty", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+SaveAndClose(base, "F03_second_empty")
+
+// F04 : image 2 = même carré déplacé
+NewProj(base, "F04_second_moved", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+Square(32, 32, 16, 255, 0, 0)
+SaveAndClose(base, "F04_second_moved")
+
+// F05 : image 2 entièrement remplie
+NewProj(base, "F05_second_full", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+Square(0, 0, 63, 0, 255, 0)
+SaveAndClose(base, "F05_second_full")
+
+// F06 : 5 images, carré qui avance de 8 px à chaque image
+NewProj(base, "F06_five_images", W, H, FPS)
+Square(0, 8, 16, 255, 0, 0)
+FOR i = 1 TO 4
+	NextImage(i)
+	px = i * 8
+	Square(px, 8, 16, 255, 0, 0)
+END
+SaveAndClose(base, "F06_five_images")
+
+// ============================================================
+// GROUPE G — Tailles et encodage des pixels. Référence : A03
+// ============================================================
+
+// G01 : grande image 300x200 (lignes > 128 pixels, découpage PackBits)
+NewProj(base, "G01_300x200", 300, 200, FPS)
+Square(8, 8, 16, 255, 0, 0)
+SaveAndClose(base, "G01_300x200")
+
+// G02 : taille impaire 65x33 (alignement, remplissage)
+NewProj(base, "G02_65x33", 65, 33, FPS)
+Square(8, 8, 16, 255, 0, 0)
+SaveAndClose(base, "G02_65x33")
+
+// G03 : bande de 16 pixels de couleurs différentes (runs littéraux)
+NewProj(base, "G03_color_strip", W, H, FPS)
+FOR i = 0 TO 15
+	cr = i * 16
+	cg = 255 - i * 16
+	px = 8 + i
+	Dot(px, 8, cr, cg, 128)
+END
+SaveAndClose(base, "G03_color_strip")
+
+// G04 : 300x200 avec 2 images (SRAW sur grande image : tuiles ?)
+NewProj(base, "G04_300x200_two_images", 300, 200, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+Square(200, 100, 64, 0, 255, 0)
+SaveAndClose(base, "G04_300x200_two_images")
+
+// G05 : grande zone peinte 256x128 en 300x200 (gros volume de données)
+NewProj(base, "G05_300x200_big_fill", 300, 200, FPS)
+Square(10, 10, 255, 255, 0, 0)
+SaveAndClose(base, "G05_300x200_big_fill")
+
+// ============================================================
+// GROUPE H — Propriétés de calque. Référence : A03
+// ============================================================
+
+// H01 : trois calques
+NewProj(base, "H01_three_layers", W, H, FPS)
+Square(0, 0, 16, 255, 0, 0)
+tv_LayerCreate "second"
+tv_LayerSet result
+Square(20, 20, 16, 0, 255, 0)
+tv_LayerCreate "third"
+tv_LayerSet result
+Square(40, 40, 16, 0, 0, 255)
+SaveAndClose(base, "H01_three_layers")
+
+// H02 : densité 25 % (comparer avec D03 à 50 %)
+NewProj(base, "H02_density_25", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerDensity 25
+SaveAndClose(base, "H02_density_25")
+
+// H03 : calque masqué
+NewProj(base, "H03_hidden", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerCurrentID
+lid = result
+tv_LayerDisplay lid "off"
+SaveAndClose(base, "H03_hidden")
+
+// H04 : mode de fusion, variante avec identifiant de calque
+NewProj(base, "H04_blend_with_id", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerCurrentID
+lid = result
+tv_LayerBlendingMode lid "Multiply"
+SaveAndClose(base, "H04_blend_with_id")
+
+// H05 : mode de fusion Screen (variante sans identifiant)
+NewProj(base, "H05_blend_screen", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerBlendingMode "Screen"
+SaveAndClose(base, "H05_blend_screen")
+
+// H06 : calque verrouillé
+NewProj(base, "H06_locked", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerCurrentID
+lid = result
+tv_LayerLock lid "on"
+SaveAndClose(base, "H06_locked")
+
+tv_Warn "Corpus 2 terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+FUNCTION NewProj(pbase, pname, pw, ph, pfps)
+	LOCAL ppath
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath pw ph 1.0 pfps "none" 0
+END
+
+FUNCTION SaveAndClose(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	// Force la validation du dernier tracé avant la sauvegarde
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+// Ajoute une image après la courante et se place dessus (index base 0)
+FUNCTION NextImage(idx)
+	tv_LayerInsertImage 1 "after"
+	tv_LayerImage idx
+END
+
+FUNCTION Square(x, y, s, r, g, b)
+	LOCAL x2 y2
+	x2 = x + s
+	y2 = y + s
+	tv_SetAPen r g b
+	tv_RectFill x y x2 y2
+END
+
+// Un seul pixel
+FUNCTION Dot(x, y, r, g, b)
+	tv_SetAPen r g b
+	tv_RectFill x y x y
+END

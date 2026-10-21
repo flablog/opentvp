@@ -1,0 +1,103 @@
+// ============================================================
+// make_tvpp_corpus5.grg — comportements avant/après des calques, et clips
+// Montage commun à chaque fichier :
+//   calque 1 « anim » : 3 images (rouge, vert, bleu) sur 3 frames
+//   calque 2 « duree » : une image grise tenue 12 frames -> le plan dure 12 frames
+// Le CSV exporté donne l'image visible à chaque frame : c'est la vérité terrain.
+// Le dernier fichier (Z01, deux clips) est expérimental : placé en fin de script.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+// ---------- P : comportement APRÈS (le calque finit à la frame 2) ----------
+Montage(base, "P00_post_none", 0, "none", "none")
+Montage(base, "P01_post_repeat", 0, "none", "repeat")
+Montage(base, "P02_post_pingpong", 0, "none", "pingpong")
+Montage(base, "P03_post_hold", 0, "none", "hold")
+
+// ---------- Q : comportement AVANT (le calque commence à la frame 5) ----------
+Montage(base, "Q00_pre_none", 5, "none", "none")
+Montage(base, "Q01_pre_repeat", 5, "repeat", "none")
+Montage(base, "Q02_pre_pingpong", 5, "pingpong", "none")
+Montage(base, "Q03_pre_hold", 5, "hold", "none")
+
+// ---------- R : combinaisons ----------
+Montage(base, "R01_pre_hold_post_hold", 5, "hold", "hold")
+Montage(base, "R02_pre_repeat_post_pingpong", 5, "repeat", "pingpong")
+
+// ---------- Z : deux clips dans un projet (expérimental) ----------
+zpath = CONCAT(base, "/Z01_two_clips.tvpp")
+zgt = CONCAT(base, "/Z01_two_clips_gt")
+tv_ProjectNew zpath 64 64 1.0 24 "none" 0
+tv_ClipName "CLIP_A_MARKER"
+Square(8, 8, 16, 255, 0, 0)
+tv_ClipNew "CLIP_B_MARKER"
+Square(32, 32, 16, 0, 0, 255)
+tv_UpdateUndo
+tv_LayerCreate "tmp_commit"
+tv_LayerKill result
+tv_SaveProject zpath
+tv_ClipSaveStructure zgt "CSV"
+tv_ProjectClose
+
+tv_Warn "Corpus 5 terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+// Construit le montage commun, applique décalage et comportements, sauve.
+FUNCTION Montage(pbase, pname, shift, pre, post)
+	LOCAL ppath gt lida lidb
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath 64 64 1.0 24 "none" 0
+
+	// calque 1 : 3 images
+	tv_LayerCurrentID
+	lida = result
+	tv_LayerRename lida "anim"
+	Square(8, 8, 16, 255, 0, 0)
+	NextImage(1)
+	Square(8, 8, 16, 0, 255, 0)
+	NextImage(2)
+	Square(8, 8, 16, 0, 0, 255)
+
+	// calque 2 : durée du plan (12 frames)
+	tv_LayerCreate "duree"
+	lidb = result
+	tv_LayerSet lidb
+	tv_LayerAnim lidb
+	Square(40, 40, 8, 128, 128, 128)
+	tv_ExposureAdd 0 11
+
+	// réglages du calque 1
+	tv_LayerSet lida
+	IF (shift > 0)
+		tv_LayerShift lida shift
+	END
+	tv_LayerPreBehavior lida pre
+	tv_LayerPostBehavior lida post
+
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+FUNCTION NextImage(idx)
+	tv_LayerInsertImage 1 "after"
+	tv_LayerImage idx
+END
+
+FUNCTION Square(x, y, s, r, g, b)
+	LOCAL x2 y2
+	x2 = x + s
+	y2 = y + s
+	tv_SetAPen r g b
+	tv_RectFill x y x2 y2
+END

@@ -1,0 +1,128 @@
+// ============================================================
+// make_tvpp_cam2.grg — corpus caméra, 2e passe : timing des points
+// Questions : effet des points doublés (tenues), normalisation du temps
+// sur la durée du clip. Même fond de calibration que make_tvpp_cam.grg.
+// A = (160,144), B = (352,144), zoom 1, sans rotation.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+// K09 : A A B  (tenue au début ?)
+Setup(base, "K09_AAB", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+Finish(base, "K09_AAB")
+
+// K10 : A B B  (tenue à la fin ?)
+Setup(base, "K10_ABB", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 352 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+Finish(base, "K10_ABB")
+
+// K11 : A B B B
+Setup(base, "K11_ABBB", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 352 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Finish(base, "K11_ABBB")
+
+// K12 : A A A B
+Setup(base, "K12_AAAB", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 160 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Finish(base, "K12_AAAB")
+
+// K13 : A B sur 50 frames (normalisation du temps sur la durée)
+Setup(base, "K13_AB_50f", 50)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 352 144 0 1
+Finish(base, "K13_AB_50f")
+
+// K14 : A B + zoom différent, 3 points A B C avec C décalé en zoom seulement
+// (un segment sans déplacement mais avec zoom : prend-il du temps ?)
+Setup(base, "K14_AB_zoomonly", 25)
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 352 144 0 1
+tv_CameraInsertPoint 2 352 144 0 2
+Finish(base, "K14_AB_zoomonly")
+
+// ---------- Rendu à travers la caméra ----------
+Render(base, "K09_AAB", "aab", 25)
+Render(base, "K10_ABB", "abb", 25)
+Render(base, "K11_ABBB", "abbb", 25)
+Render(base, "K12_AAAB", "aaab", 25)
+Render(base, "K13_AB_50f", "abfifty", 50)
+Render(base, "K14_AB_zoomonly", "abzoomonly", 25)
+
+tv_Warn "Corpus caméra 2 terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+// Projet + caméra 256x144 + fond de calibration + durée nf frames
+FUNCTION Setup(pbase, pname, nf)
+	LOCAL ppath lid last
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath 512 288 1.0 24 "none" 0
+	tv_CameraInfo 256 144
+	tv_LayerCurrentID
+	lid = result
+	tv_LayerRename lid "calibration"
+	Grid()
+	last = nf - 1
+	tv_ExposureAdd 0 last
+END
+
+FUNCTION Finish(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+FUNCTION Render(pbase, pname, word, nf)
+	LOCAL ppath out last
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	out = CONCAT(pbase, "/render_")
+	out = CONCAT(out, word)
+	out = CONCAT(out, "_0000.png")
+	tv_LoadProject ppath
+	last = nf - 1
+	tv_ProjectSaveSequence out "camera" 0 last
+	tv_ProjectClose
+END
+
+// Grille 8 colonnes x 6 lignes, pas de 64 px, carrés de 8 px
+// couleur = (32 + 28*colonne, 32 + 36*ligne, 200)
+FUNCTION Grid()
+	LOCAL i j x y r g x2 y2
+	FOR i = 0 TO 7
+		FOR j = 0 TO 5
+			x = 28 + i * 64
+			y = 20 + j * 48
+			x2 = x + 7
+			y2 = y + 7
+			r = 32 + i * 28
+			g = 32 + j * 36
+			tv_SetAPen r g 200
+			tv_RectFill x y x2 y2
+		END
+	END
+END

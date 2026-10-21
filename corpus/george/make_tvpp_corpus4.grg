@@ -1,0 +1,167 @@
+// ============================================================
+// make_tvpp_corpus4.grg — timing : expositions (tenues), décalages, instances
+// Méthode : on crée d'abord toutes les images (une par frame), puis on
+// allonge les expositions EN PARTANT DE LA DERNIÈRE, pour que les positions
+// des images précédentes ne bougent pas.
+// La vérité terrain (CSV) liste chaque frame : une tenue y apparaît comme
+// le même PNG répété. Si une commande d'exposition échoue, ça se verra là.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+W = 64
+H = 64
+FPS = 24
+
+// ============================================================
+// GROUPE X — Expositions
+// ============================================================
+
+// X01 : une image tenue 3 frames (syntaxe tv_ExposureAdd frame nombre)
+NewProj(base, "X01_hold3_add", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_ExposureAdd 0 2
+SaveAndClose(base, "X01_hold3_add")
+
+// X02 : même chose avec tv_ExposureSet (syntaxe frame durée)
+NewProj(base, "X02_hold3_set", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_ExposureSet 0 3
+SaveAndClose(base, "X02_hold3_set")
+
+// X03 : deux images, rouge tenue 3 frames puis verte tenue 2 frames
+NewProj(base, "X03_hold_3_2", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+Square(8, 8, 16, 0, 255, 0)
+tv_ExposureAdd 1 1
+tv_ExposureAdd 0 2
+SaveAndClose(base, "X03_hold_3_2")
+
+// X04 : deux images, seule la seconde est tenue (4 frames)
+NewProj(base, "X04_hold_second_only", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+Square(8, 8, 16, 0, 255, 0)
+tv_ExposureAdd 1 3
+SaveAndClose(base, "X04_hold_second_only")
+
+// X05 : trois images exposées 1, 2, 1 (rouge, vert, bleu)
+NewProj(base, "X05_hold_1_2_1", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+Square(8, 8, 16, 0, 255, 0)
+NextImage(2)
+Square(8, 8, 16, 0, 0, 255)
+tv_ExposureAdd 1 1
+SaveAndClose(base, "X05_hold_1_2_1")
+
+// X06 : animation « en deux » : 4 images exposées 2 frames chacune (8 frames)
+NewProj(base, "X06_on_twos", W, H, FPS)
+Square(0, 8, 16, 255, 0, 0)
+FOR i = 1 TO 3
+	NextImage(i)
+	px = i * 12
+	Square(px, 8, 16, 255, 0, 0)
+END
+tv_ExposureAdd 3 1
+tv_ExposureAdd 2 1
+tv_ExposureAdd 1 1
+tv_ExposureAdd 0 1
+SaveAndClose(base, "X06_on_twos")
+
+// X07 : longue tenue (30 frames) -> la durée est-elle stockée sur 1 ou 4 octets ?
+NewProj(base, "X07_hold30", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_ExposureAdd 0 29
+SaveAndClose(base, "X07_hold30")
+
+// X08 : image vide au milieu (rouge, vide, vert)
+NewProj(base, "X08_empty_middle", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+NextImage(1)
+NextImage(2)
+Square(8, 8, 16, 0, 255, 0)
+SaveAndClose(base, "X08_empty_middle")
+
+// ============================================================
+// GROUPE Y — Calques dans la timeline
+// ============================================================
+
+// Y01 : calque décalé, qui commence à la frame 5
+NewProj(base, "Y01_layer_shift5", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerCurrentID
+lid = result
+tv_LayerShift lid 5
+SaveAndClose(base, "Y01_layer_shift5")
+
+// Y02 : deux calques au timing différent
+// calque 1 : une image tenue 4 frames ; calque 2 : deux images de 2 frames
+NewProj(base, "Y02_two_layers_timing", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_ExposureAdd 0 3
+tv_LayerCreate "second"
+tv_LayerSet result
+Square(32, 32, 16, 0, 0, 255)
+NextImage(1)
+Square(40, 40, 16, 0, 0, 255)
+tv_ExposureAdd 1 1
+tv_ExposureAdd 0 1
+SaveAndClose(base, "Y02_two_layers_timing")
+
+// Y03 : tenue puis coupure de l'exposition à la frame 2 (tv_ExposureBreak)
+// -> deux instances de la même image, ou duplication ?
+NewProj(base, "Y03_hold_break", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_ExposureAdd 0 3
+tv_ExposureBreak 2
+SaveAndClose(base, "Y03_hold_break")
+
+// Y04 : nom d'instance (marqueur à retrouver dans le binaire)
+NewProj(base, "Y04_instance_name", W, H, FPS)
+Square(8, 8, 16, 255, 0, 0)
+tv_LayerCurrentID
+lid = result
+tv_InstanceSetName lid 0 "INSTANCE_MARKER"
+SaveAndClose(base, "Y04_instance_name")
+
+tv_Warn "Corpus 4 terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+FUNCTION NewProj(pbase, pname, pw, ph, pfps)
+	LOCAL ppath
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath pw ph 1.0 pfps "none" 0
+END
+
+FUNCTION SaveAndClose(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+FUNCTION NextImage(idx)
+	tv_LayerInsertImage 1 "after"
+	tv_LayerImage idx
+END
+
+FUNCTION Square(x, y, s, r, g, b)
+	LOCAL x2 y2
+	x2 = x + s
+	y2 = y + s
+	tv_SetAPen r g b
+	tv_RectFill x y x2 y2
+END

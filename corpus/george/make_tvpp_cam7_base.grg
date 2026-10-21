@@ -1,0 +1,67 @@
+// ============================================================
+// make_tvpp_cam7_base.grg — fichiers de départ pour les tests « profil de vitesse »
+// et « flou de mouvement ». Projet ET caméra à 25 i/s (pas de rééchantillonnage).
+// Grille de calibration, 25 frames.
+//   P0_base_2pts : A (160,144) -> B (352,144)
+//   P0_base_3pts : A (160,144) -> B (256,144) -> C (352,144)
+// Ces deux fichiers servent de point de départ aux réglages faits à la main.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+Setup(base, "P0_base_2pts")
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 352 144 0 1
+Finish(base, "P0_base_2pts")
+
+Setup(base, "P0_base_3pts")
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 256 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+Finish(base, "P0_base_3pts")
+
+tv_Warn "Fichiers de base créés"
+
+FUNCTION Setup(pbase, pname)
+	LOCAL ppath lid
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath 512 288 1.0 25 "none" 0
+	tv_CameraInfo 256 144
+	tv_LayerCurrentID
+	lid = result
+	tv_LayerRename lid "calibration"
+	Grid()
+	tv_ExposureAdd 0 24
+END
+
+FUNCTION Finish(pbase, pname)
+	LOCAL ppath
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ProjectClose
+END
+
+// Grille 8 colonnes x 6 lignes, pas de 64 px, carrés de 8 px
+// couleur = (32 + 28*colonne, 32 + 36*ligne, 200)
+FUNCTION Grid()
+	LOCAL i j x y r g x2 y2
+	FOR i = 0 TO 7
+		FOR j = 0 TO 5
+			x = 28 + i * 64
+			y = 20 + j * 48
+			x2 = x + 7
+			y2 = y + 7
+			r = 32 + i * 28
+			g = 32 + j * 36
+			tv_SetAPen r g 200
+			tv_RectFill x y x2 y2
+		END
+	END
+END

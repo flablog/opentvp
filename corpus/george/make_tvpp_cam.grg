@@ -1,0 +1,150 @@
+// ============================================================
+// make_tvpp_cam.grg — corpus caméra (TVPaint 11)
+// Chaque fichier : projet 512x288, caméra 256x144, 25 frames.
+// Fond de calibration : grille 8x6 de carrés de 8 px, chacun d'une couleur
+// unique (rouge = colonne, vert = ligne). Sur le rendu caméra, la position de
+// ces carrés permet de retrouver exactement le cadrage à chaque frame.
+// Un seul paramètre de caméra change d'un fichier à l'autre.
+//
+// Points de caméra : un projet neuf n'a AUCUN point ; tv_CameraInsertPoint
+// les ajoute dans l'ordre (index 0, 1, 2...). tv_CameraSetPoint ne fait que
+// modifier un point existant.
+// Le rendu (partie 2) est en fin de script : s'il échoue, le reste est déjà sauvé.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+// ---------- Partie 1 : projets ----------
+
+// K00 : aucun point de caméra (projet neuf) -> cadrage par défaut
+Setup(base, "K00_static")
+Finish(base, "K00_static")
+
+// K07 : un seul point, centré, zoom 1 (comparer à K00)
+Setup(base, "K07_one_point")
+tv_CameraInsertPoint 0 256 144 0 1
+Finish(base, "K07_one_point")
+
+// K08 : un seul point décentré et zoomé (sens du zoom : cadre ×2 ou ÷2 ?)
+Setup(base, "K08_one_point_zoom")
+tv_CameraInsertPoint 0 200 120 0 2
+Finish(base, "K08_one_point_zoom")
+
+// K01 : translation horizontale (2 points)
+Setup(base, "K01_translate")
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 352 144 0 1
+Finish(base, "K01_translate")
+
+// K02 : zoom seul (2 points, même centre)
+Setup(base, "K02_zoom")
+tv_CameraInsertPoint 0 256 144 0 1
+tv_CameraInsertPoint 1 256 144 0 2
+Finish(base, "K02_zoom")
+
+// K03 : rotation seule (2 points, même centre)
+Setup(base, "K03_rotate")
+tv_CameraInsertPoint 0 256 144 0 1
+tv_CameraInsertPoint 1 256 144 30 1
+Finish(base, "K03_rotate")
+
+// K04 : tenue - mouvement - tenue (points doublés, comme sq001_sh140)
+Setup(base, "K04_hold_move_hold")
+tv_CameraInsertPoint 0 160 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 352 144 0 1
+tv_CameraInsertPoint 3 352 144 0 1
+Finish(base, "K04_hold_move_hold")
+
+// K05 : 3 points à distances inégales (32 px puis 224 px)
+// -> le temps est-il réparti par segment ou par distance ?
+Setup(base, "K05_uneven")
+tv_CameraInsertPoint 0 128 144 0 1
+tv_CameraInsertPoint 1 160 144 0 1
+tv_CameraInsertPoint 2 384 144 0 1
+Finish(base, "K05_uneven")
+
+// K06 : diagonale + zoom + rotation combinés
+Setup(base, "K06_combined")
+tv_CameraInsertPoint 0 160 100 0 1
+tv_CameraInsertPoint 1 352 188 15 1.5
+Finish(base, "K06_combined")
+
+// ---------- Partie 2 : rendu À TRAVERS LA CAMÉRA ----------
+// Fichiers : render_<cas>_0000.png, render_<cas>_0001.png, ...
+// (pas d'autre chiffre dans le nom : TVPaint y insère le numéro de frame)
+Render(base, "K00_static", "static")
+Render(base, "K07_one_point", "onepoint")
+Render(base, "K08_one_point_zoom", "onepointzoom")
+Render(base, "K01_translate", "translate")
+Render(base, "K02_zoom", "zoom")
+Render(base, "K03_rotate", "rotate")
+Render(base, "K04_hold_move_hold", "holdmovehold")
+Render(base, "K05_uneven", "uneven")
+Render(base, "K06_combined", "combined")
+
+tv_Warn "Corpus caméra terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+// Projet + caméra 256x144 + fond de calibration + durée 25 frames
+FUNCTION Setup(pbase, pname)
+	LOCAL ppath lid
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath 512 288 1.0 24 "none" 0
+	tv_CameraInfo 256 144
+	tv_LayerCurrentID
+	lid = result
+	tv_LayerRename lid "calibration"
+	Grid()
+	tv_ExposureAdd 0 24
+END
+
+FUNCTION Finish(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+FUNCTION Render(pbase, pname, word)
+	LOCAL ppath out
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	out = CONCAT(pbase, "/render_")
+	out = CONCAT(out, word)
+	out = CONCAT(out, "_0000.png")
+	tv_LoadProject ppath
+	tv_ProjectSaveSequence out "camera" 0 24
+	tv_ProjectClose
+END
+
+// Grille 8 colonnes x 6 lignes, pas de 64 px, carrés de 8 px
+// couleur = (32 + 28*colonne, 32 + 36*ligne, 200)
+FUNCTION Grid()
+	LOCAL i j x y r g x2 y2
+	FOR i = 0 TO 7
+		FOR j = 0 TO 5
+			x = 28 + i * 64
+			y = 20 + j * 48
+			x2 = x + 7
+			y2 = y + 7
+			r = 32 + i * 28
+			g = 32 + j * 36
+			tv_SetAPen r g 200
+			tv_RectFill x y x2 y2
+		END
+	END
+END

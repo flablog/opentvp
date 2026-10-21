@@ -1,0 +1,169 @@
+// ============================================================
+// make_tvpp_cam5.grg — sur quelle durée la caméra se répartit-elle ?
+// Même chemin partout : A (160,144) -> B (352,144), zoom 1.
+// Grille de calibration + compteur de frames (comme la passe 3).
+// On fait varier : longueur du contenu visible, calque masqué plus long,
+// marques in/out. Rendu de 0 à 49 dans tous les cas.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+
+// D1 : témoin, tout dure 25 frames
+Setup(base, "D1_ref25", 25, 0, 1)
+Path()
+Finish(base, "D1_ref25")
+
+// D2 : contenu 25 frames + calque VISIBLE qui dure 50 frames
+Setup(base, "D2_visible50", 25, 50, 1)
+Path()
+Finish(base, "D2_visible50")
+
+// D3 : contenu 25 frames + calque MASQUÉ qui dure 50 frames
+Setup(base, "D3_hidden50", 25, 50, 0)
+Path()
+Finish(base, "D3_hidden50")
+
+// D4 : contenu 50 frames, marques 0 -> 24
+Setup(base, "D4_marks0_24", 50, 0, 1)
+Path()
+tv_MarkIn 0 "set"
+tv_MarkOut 24 "set"
+Finish(base, "D4_marks0_24")
+
+// D5 : contenu 50 frames, marques 10 -> 39
+Setup(base, "D5_marks10_39", 50, 0, 1)
+Path()
+tv_MarkIn 10 "set"
+tv_MarkOut 39 "set"
+Finish(base, "D5_marks10_39")
+
+// D6 : contenu 25 frames + calque visible de 50 frames + marques 0 -> 24
+Setup(base, "D6_visible50_marks", 25, 50, 1)
+Path()
+tv_MarkIn 0 "set"
+tv_MarkOut 24 "set"
+Finish(base, "D6_visible50_marks")
+
+// ---------- Rendu à travers la caméra, frames 0 à 49 ----------
+Render(base, "D1_ref25", "dref")
+Render(base, "D2_visible50", "dvisible")
+Render(base, "D3_hidden50", "dhidden")
+Render(base, "D4_marks0_24", "dmarksa")
+Render(base, "D5_marks10_39", "dmarksb")
+Render(base, "D6_visible50_marks", "dvisiblemarks")
+
+tv_Warn "Corpus caméra 5 terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+FUNCTION Path()
+	tv_CameraInsertPoint 0 160 144 0 1
+	tv_CameraInsertPoint 1 352 144 0 1
+END
+
+// nvis : durée de la grille et du compteur
+// nextra : durée d'un calque supplémentaire (0 = aucun), visible ou non
+FUNCTION Setup(pbase, pname, nvis, nextra, vis)
+	LOCAL ppath lid i r g last
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath 512 288 1.0 24 "none" 0
+	tv_CameraInfo 256 144
+	tv_LayerCurrentID
+	lid = result
+	tv_LayerRename lid "calibration"
+	Grid()
+	last = nvis - 1
+	tv_ExposureAdd 0 last
+	// compteur
+	tv_LayerCreate "compteur"
+	lid = result
+	tv_LayerSet lid
+	tv_LayerAnim lid
+	FOR i = 0 TO last
+		IF (i > 0)
+			tv_LayerInsertImage 1 "after"
+			tv_LayerImage i
+		END
+		r = i * 5
+		g = 255 - i * 5
+		Dots(r, g)
+	END
+	// calque supplémentaire (petit carré gris dans un coin)
+	IF (nextra > 0)
+		tv_LayerCreate "extra"
+		lid = result
+		tv_LayerSet lid
+		tv_LayerAnim lid
+		tv_SetAPen 128 128 128
+		tv_RectFill 2 2 5 5
+		last = nextra - 1
+		tv_ExposureAdd 0 last
+		IF (vis < 1)
+			tv_LayerDisplay lid "off"
+		END
+	END
+END
+
+// Petits carrés de 4 px à mi-chemin entre les carrés de la grille
+FUNCTION Dots(r, g)
+	LOCAL i j x y x2 y2
+	tv_SetAPen r g 0
+	FOR i = 0 TO 7
+		FOR j = 0 TO 5
+			x = 60 + i * 64
+			y = 44 + j * 48
+			x2 = x + 3
+			y2 = y + 3
+			tv_RectFill x y x2 y2
+		END
+	END
+END
+
+FUNCTION Finish(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
+
+FUNCTION Render(pbase, pname, word)
+	LOCAL ppath out
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	out = CONCAT(pbase, "/render_")
+	out = CONCAT(out, word)
+	out = CONCAT(out, "_0000.png")
+	tv_LoadProject ppath
+	tv_ProjectSaveSequence out "camera" 0 49
+	tv_ProjectClose
+END
+
+// Grille 8 colonnes x 6 lignes, pas de 64 px, carrés de 8 px
+// couleur = (32 + 28*colonne, 32 + 36*ligne, 200)
+FUNCTION Grid()
+	LOCAL i j x y r g x2 y2
+	FOR i = 0 TO 7
+		FOR j = 0 TO 5
+			x = 28 + i * 64
+			y = 20 + j * 48
+			x2 = x + 7
+			y2 = y + 7
+			r = 32 + i * 28
+			g = 32 + j * 36
+			tv_SetAPen r g 200
+			tv_RectFill x y x2 y2
+		END
+	END
+END

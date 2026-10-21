@@ -1,0 +1,16 @@
+# binaires et paquets : publiés dans les releases, pas dans git
+c/build/
+dist/
+*.exe
+tvpp-linux
+tvpp-macos
+gmon.out
+# python
+__pycache__/
+*.pyc
+.venv/
+# sorties de test et fichiers de production
+sorties/
+out/
+*_tvpp_backup
+sq*_sh*.tvpp

@@ -1,0 +1,206 @@
+[
+ {
+  "tvpp": "data/07_camera_base/K00_static.tvpp",
+  "prefix": "render_static"
+ },
+ {
+  "tvpp": "data/07_camera_base/K07_one_point.tvpp",
+  "prefix": "render_onepoint"
+ },
+ {
+  "tvpp": "data/07_camera_base/K08_one_point_zoom.tvpp",
+  "prefix": "render_onepointzoom"
+ },
+ {
+  "tvpp": "data/07_camera_base/K01_translate.tvpp",
+  "prefix": "render_translate"
+ },
+ {
+  "tvpp": "data/07_camera_base/K02_zoom.tvpp",
+  "prefix": "render_zoom"
+ },
+ {
+  "tvpp": "data/07_camera_base/K03_rotate.tvpp",
+  "prefix": "render_rotate"
+ },
+ {
+  "tvpp": "data/07_camera_base/K04_hold_move_hold.tvpp",
+  "prefix": "render_holdmovehold"
+ },
+ {
+  "tvpp": "data/07_camera_base/K05_uneven.tvpp",
+  "prefix": "render_uneven"
+ },
+ {
+  "tvpp": "data/07_camera_base/K06_combined.tvpp",
+  "prefix": "render_combined"
+ },
+ {
+  "tvpp": "data/08_camera_points_doubles/K09_AAB.tvpp",
+  "prefix": "render_aab"
+ },
+ {
+  "tvpp": "data/08_camera_points_doubles/K10_ABB.tvpp",
+  "prefix": "render_abb"
+ },
+ {
+  "tvpp": "data/08_camera_points_doubles/K11_ABBB.tvpp",
+  "prefix": "render_abbb"
+ },
+ {
+  "tvpp": "data/08_camera_points_doubles/K12_AAAB.tvpp",
+  "prefix": "render_aaab"
+ },
+ {
+  "tvpp": "data/08_camera_points_doubles/K13_AB_50f.tvpp",
+  "prefix": "render_abfifty"
+ },
+ {
+  "tvpp": "data/08_camera_points_doubles/K14_AB_zoomonly.tvpp",
+  "prefix": "render_abzoomonly"
+ },
+ {
+  "tvpp": "data/09_camera_trajets/M01_AABB.tvpp",
+  "prefix": "render_aabb"
+ },
+ {
+  "tvpp": "data/09_camera_trajets/M02_ABBC.tvpp",
+  "prefix": "render_abbc"
+ },
+ {
+  "tvpp": "data/09_camera_trajets/M03_AABC.tvpp",
+  "prefix": "render_aabc"
+ },
+ {
+  "tvpp": "data/09_camera_trajets/M04_ABCC.tvpp",
+  "prefix": "render_abcc"
+ },
+ {
+  "tvpp": "data/09_camera_trajets/M05_ABC.tvpp",
+  "prefix": "render_abc"
+ },
+ {
+  "tvpp": "data/09_camera_trajets/M06_AB_zoomB_C.tvpp",
+  "prefix": "render_abzoombc"
+ },
+ {
+  "tvpp": "data/09_camera_trajets/M07_AAABB.tvpp",
+  "prefix": "render_aaabb"
+ },
+ {
+  "tvpp": "data/09_camera_trajets/M08_AB_marks.tvpp",
+  "prefix": "render_abmarks"
+ },
+ {
+  "tvpp": "data/09_camera_trajets/M09_AABB_marks.tvpp",
+  "prefix": "render_aabbmarks"
+ },
+ {
+  "tvpp": "data/10_camera_duree_visible/D1_ref25.tvpp",
+  "prefix": "render_dref"
+ },
+ {
+  "tvpp": "data/10_camera_duree_visible/D2_visible50.tvpp",
+  "prefix": "render_dvisible"
+ },
+ {
+  "tvpp": "data/10_camera_duree_visible/D3_hidden50.tvpp",
+  "prefix": "render_dhidden"
+ },
+ {
+  "tvpp": "data/10_camera_duree_visible/D4_marks0_24.tvpp",
+  "prefix": "render_dmarksa"
+ },
+ {
+  "tvpp": "data/10_camera_duree_visible/D5_marks10_39.tvpp",
+  "prefix": "render_dmarksb"
+ },
+ {
+  "tvpp": "data/10_camera_duree_visible/D6_visible50_marks.tvpp",
+  "prefix": "render_dvisiblemarks"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N010_fps24.tvpp",
+  "prefix": "render_ten"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N024_fps24.tvpp",
+  "prefix": "render_twentyfour"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N025_fps24.tvpp",
+  "prefix": "render_twentyfive"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N026_fps24.tvpp",
+  "prefix": "render_twentysix"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N048_fps24.tvpp",
+  "prefix": "render_fortyeight"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N049_fps24.tvpp",
+  "prefix": "render_fortynine"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N050_fps24.tvpp",
+  "prefix": "render_fifty"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N051_fps24.tvpp",
+  "prefix": "render_fiftyone"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N075_fps24.tvpp",
+  "prefix": "render_seventyfive"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N100_fps24.tvpp",
+  "prefix": "render_hundred"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N117_fps24.tvpp",
+  "prefix": "render_hundredseventeen"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N120_fps24.tvpp",
+  "prefix": "render_hundredtwenty"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N050_fps25.tvpp",
+  "prefix": "render_fiftyfps"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N117_fps25.tvpp",
+  "prefix": "render_hundredseventeenfps"
+ },
+ {
+  "tvpp": "data/11_camera_cadence/N120_fps25.tvpp",
+  "prefix": "render_hundredtwentyfps"
+ },
+ {
+  "tvpp": "data/12_camera_profils_flou/P1_ease_in.tvpp",
+  "prefix": "render_easein"
+ },
+ {
+  "tvpp": "data/12_camera_profils_flou/P2_ease_out.tvpp",
+  "prefix": "render_easeout"
+ },
+ {
+  "tvpp": "data/12_camera_profils_flou/P3_ease_inout.tvpp",
+  "prefix": "render_easeinout"
+ },
+ {
+  "tvpp": "data/12_camera_profils_flou/P4_courbe.tvpp",
+  "prefix": "render_custom"
+ },
+ {
+  "tvpp": "data/12_camera_profils_flou/P5_3pts_ease_inout.tvpp",
+  "prefix": "render_threeptsease"
+ },
+ {
+  "tvpp": "data/12_camera_profils_flou/B1_motion_blur.tvpp",
+  "prefix": "render_motionblur"
+ }
+]

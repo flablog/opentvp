@@ -1,0 +1,17 @@
+UTF-8, TVPaint, "CSV 1.1"
+Project Name, Width, Height, Frame Count, Layer Count, Frame Rate, Pixel Aspect Ratio, Field Mode
+"Clip_001", 64, 64, 8, 1, 24.000000, 1.000000, Progressive
+
+#Layers,"Anim_01"
+#Folder,"C:\projets\nebuleuse\TECH\test_tvpp\sorties5\X06_on_twos_gt.layers\[001] Anim_01"
+#Density,1.000000
+#Blending,"Color"
+#Visible,1
+#00000, "[001][00000] Anim_01.png"
+#00001,
+#00002, "[001][00002] Anim_01.png"
+#00003, "[001][00003] Anim_01.png"
+#00004, "[001][00004] Anim_01.png"
+#00005,
+#00006, "[001][00006] Anim_01.png"
+#00007,
