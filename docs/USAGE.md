@@ -1,6 +1,6 @@
 # opentvp — read and render TVPaint 11 files without TVPaint
 
-A single executable, no installation, no dependencies (≈ 220 KB).
+A single executable, no installation, no dependencies (≈ 220 KB). A separate player, `opentvp-play`, is described below.
 `opentvp.exe` for 64-bit Windows 10/11, `opentvp-macos` for Mac (universal binary: Apple Silicon M1–M4 and Intel, macOS 11 and later), `opentvp-linux` (static) for a Linux server.
 
 ### First run on a Mac
@@ -36,6 +36,47 @@ opentvp render file.tvpp folder --layers                one folder per layer, ev
 | `--threads N` | number of cores used (default: all) |
 | `--prefix NAME` | PNG prefix (default: clip name) → `NAME_0000.png`, … |
 | `--png-level N` | PNG compression 0-12 (default 6) |
+
+## Player: opentvp-play
+
+A separate executable, so that `opentvp` stays as small as it is: `opentvp-play.exe` (Windows) and `opentvp-play-linux` (Linux desktop, X11 or XWayland). Not available on macOS yet.
+
+```
+opentvp-play file.tvpp [file2.tvpp ...] [--clip N [--frames A-B]] [--scale S] [--blur-samples N] [--threads N]
+```
+
+It plays every clip of every file given, one after the other, in the order of the command line and then of each project, rendered through the camera exactly like `opentvp render`, in a loop at the project frame rate. Clips hidden in TVPaint are left out; **H** adds them to the timeline (purple names) or removes them again, without losing the frames already loaded. `--clip N` plays a single clip of a single file, hidden or not, and only then can `--frames` choose its range. Each clip plays its in/out marks, otherwise all its visible content. Files may have different sizes and frame rates: each clip plays at its own project frame rate. On Windows, you can also drop `.tvpp` files onto `opentvp-play.exe`.
+
+**Drag and drop.** Drag `.tvpp` files from the file explorer onto the player window: the window splits in two. Drop on the top half, **Replace current timeline**, to close the open files and clear the memory before opening the new ones; drop on the bottom half, **Append to timeline**, to add them after the current timeline. A file that cannot be opened is reported in a message and the rest is kept.
+
+**Preview resolution.** The button at the bottom left of the bar (`50%`) opens a menu: full resolution (100 %, the camera size) or half resolution (50 %, the default: 4 times faster to load and 4 times less memory). Changing it renders the frames again. The choice is remembered for the next time, in `%APPDATA%\opentvp\play.ini` (Windows) or `~/.config/opentvp/play.ini` (Linux); `--scale` overrides it for one session without saving it.
+
+Frames are rendered in the background and kept in memory: playback starts with the first frames. Loading always continues from the current frame, inside the in/out selection first. **F1 shows the keyboard shortcuts in the player, Ctrl+I the file information**: canvas and camera size, frame rates (with a warning when TVPaint would resample), author and date, duration, preview resolution and memory used, every clip (range, frames, duration, marks, layers) and, for the current clip, its camera, background and any blending mode played as Color.
+
+**Timeline.** One section per clip, with its name and its number of frames (click a name to play only that clip). Light grey = frames in memory, dark = not loaded yet, blue = played. Orange brackets show the in / out points; outside them the timeline is darker and playback loops between them. When playback catches up with frames that are not loaded yet, it waits and the play / pause button turns red; the window title shows the loading percentage.
+
+**Counter.** First the frame in the current clip, counted from 0 as in the project settings (the TVPaint timeline shows +1), then the position in the whole playback / the total number of frames (counted from 1).
+
+| key / control | effect |
+|---|---|
+| Space or K, play / pause button | play / pause |
+| click or drag on the timeline | go to a frame |
+| Left / Right arrows, mouse wheel | one frame back / forward |
+| Home / End | go to the in / out point |
+| Ctrl + Left / Right, click on a clip name | play only the previous / next clip (sets in / out on it) |
+| I or [ | in point at the current frame |
+| O or ] | out point at the current frame |
+| \ | reset in / out: play everything |
+| H | show / hide the clips hidden in TVPaint |
+| Ctrl + I | file information |
+| F, F11, fullscreen button, double-click on the picture | fullscreen on / off (the picture is resized to fit) |
+| Esc | close the help or the information / leave fullscreen |
+| Q | quit |
+| F1 or ? | show / hide the shortcuts |
+
+Keys are read as typed characters, so `[`, `]` and `\` work on any keyboard layout (AltGr on AZERTY). In fullscreen, the bar and the cursor hide after 2 seconds of playback without moving the mouse.
+
+In memory, a 1920×1080 camera takes ≈ 2 MB per frame at half resolution and ≈ 8 MB at full resolution; if memory runs out, the player keeps the frames already loaded and says so.
 
 ## Layer-by-layer export
 

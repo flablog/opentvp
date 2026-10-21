@@ -1,30 +1,43 @@
 #!/bin/sh
-# Builds opentvp.
-#   ./build.sh          native binary (gcc or cc, otherwise zig) -> build/opentvp (build/opentvp.exe on Windows)
+# Builds opentvp and the opentvp-play player.
+#   ./build.sh          native binaries (gcc or cc, otherwise zig) -> build/opentvp, build/opentvp-play (.exe on Windows)
 #   ./build.sh all      + Windows, static Linux, universal Mac (requires: pip install ziglang)
+# The player exists for Windows and Linux (X11) only; it is not built on macOS.
 # Python: PYTHON variable, otherwise python3, otherwise python (on Windows, python3 is often the Store shortcut).
 set -e
 cd "$(dirname "$0")"
 VERSION=$(cat ../VERSION 2>/dev/null || echo dev)
 D=third_party/libdeflate/lib
-SRC="opentvp.c $D/deflate_compress.c $D/deflate_decompress.c $D/zlib_compress.c $D/zlib_decompress.c $D/adler32.c $D/crc32.c $D/utils.c $D/x86/cpu_features.c $D/arm/cpu_features.c"
+LIB="$D/deflate_compress.c $D/deflate_decompress.c $D/zlib_compress.c $D/zlib_decompress.c $D/adler32.c $D/crc32.c $D/utils.c $D/x86/cpu_features.c $D/arm/cpu_features.c"
+SRC="opentvp.c $LIB"
+PLAY="opentvp-play.c $LIB"
 FLAGS="-O3 -Ithird_party/libdeflate -DOPENTVP_VERSION=\"$VERSION\""
+PLAY_WIN="-lshell32 -lgdi32 -luser32 -lwinmm -lole32"
+PLAY_X11="-Ithird_party/x11 -lm -lpthread -ldl"
 PY=${PYTHON:-$(python3 -c '' 2>/dev/null && echo python3 || echo python)}
 ZIG="${ZIG:-$PY -m ziglang} cc"
 mkdir -p build
 CC_NATIVE=$(command -v gcc || command -v cc || true)
 if [ -n "$CC_NATIVE" ]; then
     $CC_NATIVE $FLAGS -o build/opentvp $SRC -lm -lpthread
+    [ "$(uname -s)" = Darwin ] || $CC_NATIVE $FLAGS -o build/opentvp-play $PLAY $PLAY_X11
 else
     case "$(uname -s)" in
         # -mevex512: otherwise zig 0.16 (latest available on Windows) rejects libdeflate 1.22's AVX-512 code
-        MINGW*|MSYS*|CYGWIN*) $ZIG -target x86_64-windows-gnu $FLAGS -mevex512 -o build/opentvp.exe $SRC -lshell32 ;;
-        *) $ZIG $FLAGS -o build/opentvp $SRC -lm -lpthread ;;
+        MINGW*|MSYS*|CYGWIN*)
+            $ZIG -target x86_64-windows-gnu $FLAGS -mevex512 -o build/opentvp.exe $SRC -lshell32
+            $ZIG -target x86_64-windows-gnu $FLAGS -mevex512 -o build/opentvp-play.exe $PLAY $PLAY_WIN ;;
+        *)
+            $ZIG $FLAGS -o build/opentvp $SRC -lm -lpthread
+            [ "$(uname -s)" = Darwin ] || $ZIG $FLAGS -o build/opentvp-play $PLAY $PLAY_X11 ;;
     esac
 fi
 if [ "${1:-}" = "all" ]; then
     $ZIG -target x86_64-windows-gnu $FLAGS -s -o build/opentvp.exe $SRC -lshell32
+    $ZIG -target x86_64-windows-gnu $FLAGS -s -o build/opentvp-play.exe $PLAY $PLAY_WIN
     $ZIG -target x86_64-linux-musl $FLAGS -s -static -o build/opentvp-linux $SRC
+    # the player loads libX11 at run time: dynamic glibc, old enough for any current distribution
+    $ZIG -target x86_64-linux-gnu.2.28 $FLAGS -s -o build/opentvp-play-linux $PLAY $PLAY_X11
     $ZIG -target aarch64-macos $FLAGS -o build/opentvp-arm64 $SRC
     $ZIG -target x86_64-macos $FLAGS -o build/opentvp-x86_64 $SRC
     $PY make_universal.py build/opentvp-macos build/opentvp-x86_64 build/opentvp-arm64

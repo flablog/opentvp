@@ -3,6 +3,7 @@ c/build/
 dist/
 *.exe
 opentvp-linux
+opentvp-play-linux
 opentvp-macos
 gmon.out
 # python

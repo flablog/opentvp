@@ -53,7 +53,12 @@ static int mkdir_u8(const char *p) { wchar_t *w = widen(p); int r = _wmkdir(w); 
 
 /* ------------------------------------------------------------------ utilities */
 
-static void die(const char *msg) { fprintf(stderr, "error: %s\n", msg); exit(1); }
+static void (*g_die_hook)(const char *msg);   /* set by a GUI front end: shows the error, or recovers from it */
+static void die(const char *msg) {
+    if (g_die_hook) g_die_hook(msg);
+    fprintf(stderr, "error: %s\n", msg);
+    exit(1);
+}
 static void *xmalloc(size_t n) { void *p = malloc(n ? n : 1); if (!p) die("out of memory"); return p; }
 static void *xcalloc(size_t n) { void *p = calloc(1, n ? n : 1); if (!p) die("out of memory"); return p; }
 static void *xrealloc(void *p, size_t n) { p = realloc(p, n ? n : 1); if (!p) die("out of memory"); return p; }
@@ -67,7 +72,7 @@ typedef struct { uint8_t *d; size_t n; } Buf;
 static Buf read_file(const char *path) {
     Buf b = {0, 0};
     FILE *f = fopen_u8(path, "rb");
-    if (!f) { fprintf(stderr, "error: cannot open %s\n", path); exit(1); }
+    if (!f) { char msg[2100]; snprintf(msg, sizeof msg, "cannot open %s", path); die(msg); }
     size_t cap = 1 << 24;
     b.d = xmalloc(cap);
     for (;;) {
@@ -950,10 +955,9 @@ static void png_encode(Bytes *out, const uint8_t *px, int w, int h, int ch) {
 
 static int bytes_save(const char *path, const Bytes *b);
 
-static int write_png(const char *path, const float *acc, const float *cover, int w, int h, int mode, const float bg[3]) {
+/* 8-bit pixels from a rendered frame: RGB (mode 0) or straight-alpha RGBA (mode 1) */
+static void compose_pixels(const float *acc, const float *cover, int w, int h, int mode, const float bg[3], uint8_t *px) {
     /* mode 0: background (bg colour on the canvas, black elsewhere); 1: transparent */
-    int ch = mode == 1 ? 4 : 3;
-    uint8_t *px = xmalloc((size_t)w * h * ch);
     for (size_t i = 0; i < (size_t)w * h; i++) {
         const float *a = acc + i * 4;
         if (mode == 1) {
@@ -972,6 +976,12 @@ static int write_png(const char *path, const float *acc, const float *cover, int
             }
         }
     }
+}
+
+static int write_png(const char *path, const float *acc, const float *cover, int w, int h, int mode, const float bg[3]) {
+    int ch = mode == 1 ? 4 : 3;
+    uint8_t *px = xmalloc((size_t)w * h * ch);
+    compose_pixels(acc, cover, w, h, mode, bg, px);
     Bytes b = {0, 0, 0};
     png_encode(&b, px, w, h, ch);
     int ok = bytes_save(path, &b);
@@ -1536,6 +1546,54 @@ static void sanitize(char *s) {
     for (; *s; s++) if (*s == '/' || *s == '\\' || *s == ':' || *s == '*' || *s == '?' || *s == '"' || *s == '<' || *s == '>' || *s == '|' || *s == ' ') *s = '_';
 }
 
+/* final render setup for a clip (warns about unsupported blending modes) */
+static Clip *renderer_setup(Renderer *R, Project *P, int clip, double scale, int blur_samples) {
+    if (clip < 1 || clip > P->nclips) die("invalid clip number");
+    Clip *C = &P->clips[clip - 1];
+    memset(R, 0, sizeof *R);
+    R->P = P; R->C = C; R->scale = scale > 0 ? scale : 1; R->blur_samples = blur_samples;
+    R->ow = (int)(P->out_w * R->scale + 0.5); R->oh = (int)(P->out_h * R->scale + 0.5);
+    if (R->ow < 1) R->ow = 1;
+    if (R->oh < 1) R->oh = 1;
+    R->nls = C->nlayers;
+    R->ls = xcalloc(sizeof(LayerState) * (R->nls + 1));
+    for (int i = 0; i < R->nls; i++) {
+        layer_init(&R->ls[i], &C->layers[i], P->width, P->height);
+        const Layer *L = &C->layers[i];
+        int b = L->blend;
+        if (L->visible && !(b == 0 || b == 1 || b == 2 || b == 7 || b == 9 || b == 10 || b == 11 || b == 12 || b == 15 || b == 17 || b == 25 || b == 26))
+            fprintf(stderr, "  ⚠ layer \"%s\": unsupported mode %s, rendered as normal\n", L->name, blend_name(b));
+    }
+    return C;
+}
+
+/* rendered range: --frames if given (f0 >= 0), otherwise in/out marks, otherwise all visible content */
+static void render_range(const Clip *C, int *f0, int *f1) {
+    int N = C->visible_frames;
+    if (*f0 < 0) {
+        if (C->mark_in >= 0 || C->mark_out >= 0) { *f0 = C->mark_in >= 0 ? C->mark_in : 0; *f1 = C->mark_out >= 0 ? C->mark_out : N - 1; }
+        else { *f0 = 0; *f1 = N - 1; }
+    }
+    if (*f1 > N - 1) *f1 = N - 1;
+}
+
+/* --bg mode -> 0 (colour in bg) or 1 (transparent) */
+static int render_background(const Clip *C, const char *bgmode, float bg[3]) {
+    int mode = 0;
+    bg[0] = bg[1] = bg[2] = 0;
+    if (!strcmp(bgmode, "transparent")) mode = 1;
+    else if (bgmode[0] == '#' && strlen(bgmode) >= 7) {
+        unsigned r, g, b; sscanf(bgmode + 1, "%2x%2x%2x", &r, &g, &b);
+        bg[0] = r / 255.f; bg[1] = g / 255.f; bg[2] = b / 255.f;
+    } else if (C->has_bg) {
+        /* BGP1 / BGP2: bytes in R G B A order */
+        bg[0] = C->bg1[0] / 255.f; bg[1] = C->bg1[1] / 255.f; bg[2] = C->bg1[2] / 255.f;
+        if (memcmp(C->bg1, C->bg2, 3) != 0)
+            fprintf(stderr, "  ⚠ two-colour project background (probably a checkerboard): rendered on the first one\n");
+    }
+    return mode;
+}
+
 static int cmd_render(int argc, char **argv) {
     if (argc < 2) { usage(); return 2; }
     const char *path = argv[0], *outdir = argv[1];
@@ -1570,41 +1628,11 @@ static int cmd_render(int argc, char **argv) {
     clock_t t_start = clock();
     time_t w_start = time(NULL);
     Project P = load_project(path);
-    if (clip < 1 || clip > P.nclips) die("invalid clip number");
-    Clip *C = &P.clips[clip - 1];
     Renderer R;
-    memset(&R, 0, sizeof R);
-    R.P = &P; R.C = C; R.scale = scale > 0 ? scale : 1; R.blur_samples = blur_samples;
-    R.ow = (int)(P.out_w * R.scale + 0.5); R.oh = (int)(P.out_h * R.scale + 0.5);
-    if (R.ow < 1) R.ow = 1;
-    if (R.oh < 1) R.oh = 1;
-    R.nls = C->nlayers;
-    R.ls = xcalloc(sizeof(LayerState) * (R.nls + 1));
-    for (int i = 0; i < R.nls; i++) {
-        layer_init(&R.ls[i], &C->layers[i], P.width, P.height);
-        const Layer *L = &C->layers[i];
-        int b = L->blend;
-        if (L->visible && !(b == 0 || b == 1 || b == 2 || b == 7 || b == 9 || b == 10 || b == 11 || b == 12 || b == 15 || b == 17 || b == 25 || b == 26))
-            fprintf(stderr, "  ⚠ layer \"%s\": unsupported mode %s, rendered as normal\n", L->name, blend_name(b));
-    }
-    int N = C->visible_frames;
-    if (f0 < 0) {
-        if (C->mark_in >= 0 || C->mark_out >= 0) { f0 = C->mark_in >= 0 ? C->mark_in : 0; f1 = C->mark_out >= 0 ? C->mark_out : N - 1; }
-        else { f0 = 0; f1 = N - 1; }
-    }
-    if (f1 > N - 1) f1 = N - 1;
-    float bg[3] = {0, 0, 0};
-    int mode = 0;
-    if (!strcmp(bgmode, "transparent")) mode = 1;
-    else if (bgmode[0] == '#' && strlen(bgmode) >= 7) {
-        unsigned r, g, b; sscanf(bgmode + 1, "%2x%2x%2x", &r, &g, &b);
-        bg[0] = r / 255.f; bg[1] = g / 255.f; bg[2] = b / 255.f;
-    } else if (C->has_bg) {
-        /* BGP1 / BGP2: bytes in R G B A order */
-        bg[0] = C->bg1[0] / 255.f; bg[1] = C->bg1[1] / 255.f; bg[2] = C->bg1[2] / 255.f;
-        if (memcmp(C->bg1, C->bg2, 3) != 0)
-            fprintf(stderr, "  ⚠ two-colour project background (probably a checkerboard): rendered on the first one\n");
-    }
+    Clip *C = renderer_setup(&R, &P, clip, scale, blur_samples);
+    render_range(C, &f0, &f1);
+    float bg[3];
+    int mode = render_background(C, bgmode, bg);
     MKDIR(outdir);
     char pre[512];
     snprintf(pre, sizeof pre, "%s", prefix ? prefix : C->name);
@@ -1625,21 +1653,28 @@ static int cmd_render(int argc, char **argv) {
     return 0;
 }
 
-int main(int argc, char **argv) {
+/* Windows: UTF-8 console output and arguments (paths with accents) */
+static void utf8_args(int *argc, char ***argv) {
 #ifdef _WIN32
     SetConsoleOutputCP(65001);
-    {   /* arguments as UTF-8 (paths with accents) */
-        int wc; wchar_t **wv = CommandLineToArgvW(GetCommandLineW(), &wc);
-        if (wv) {
-            argv = malloc(sizeof(char *) * (wc + 1)); argc = wc;
-            for (int i = 0; i < wc; i++) {
-                int n = WideCharToMultiByte(CP_UTF8, 0, wv[i], -1, NULL, 0, NULL, NULL);
-                argv[i] = malloc(n); WideCharToMultiByte(CP_UTF8, 0, wv[i], -1, argv[i], n, NULL, NULL);
-            }
-            argv[wc] = NULL;
+    int wc; wchar_t **wv = CommandLineToArgvW(GetCommandLineW(), &wc);
+    if (wv) {
+        char **a = malloc(sizeof(char *) * (wc + 1));
+        for (int i = 0; i < wc; i++) {
+            int n = WideCharToMultiByte(CP_UTF8, 0, wv[i], -1, NULL, 0, NULL, NULL);
+            a[i] = malloc(n); WideCharToMultiByte(CP_UTF8, 0, wv[i], -1, a[i], n, NULL, NULL);
         }
+        a[wc] = NULL;
+        *argc = wc; *argv = a;
     }
+#else
+    (void)argc; (void)argv;
 #endif
+}
+
+#ifndef OPENTVP_NO_MAIN
+int main(int argc, char **argv) {
+    utf8_args(&argc, &argv);
     if (argc >= 2 && (!strcmp(argv[1], "--version") || !strcmp(argv[1], "version"))) { printf("opentvp %s\n", OPENTVP_VERSION); return 0; }
     if (argc < 3) { usage(); return 2; }
     if (!strcmp(argv[1], "info")) return cmd_info(argv[2], argc > 3 && !strcmp(argv[3], "--json"));
@@ -1647,3 +1682,4 @@ int main(int argc, char **argv) {
     usage();
     return 2;
 }
+#endif

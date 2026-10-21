@@ -4,7 +4,7 @@ A Les Fées Spéciales project: read `.tvpp` files (TVPaint Animation 11) withou
 
 ## Layout
 
-- `c/`: the shipped tool (`opentvp`, `opentvp.exe`, `opentvp-macos`). A single source file, `c/opentvp.c`, plus `c/third_party/libdeflate` (MIT). Build: `c/build.sh` (native) or `c/build.sh all` (Windows, universal Mac, static Linux, via `pip install ziglang`).
+- `c/`: the shipped tool (`opentvp`, `opentvp.exe`, `opentvp-macos`). A single source file, `c/opentvp.c`, plus `c/third_party/libdeflate` (MIT). The player `c/opentvp-play.c` is a separate binary that `#include`s `opentvp.c` (with `OPENTVP_NO_MAIN`) and adds a minimal window layer: Win32 GDI (+ OLE drop target), or X11 loaded with `dlopen` (+ XDND) (headers vendored in `c/third_party/x11`). Its text uses the Spleen bitmap font, generated into `c/third_party/spleen/spleen.h` by `gen_font.py`. No macOS window layer yet: it needs a Mac to build and test. Build: `c/build.sh` (native) or `c/build.sh all` (Windows, universal Mac, static Linux, via `pip install ziglang`).
 - `python/`: reference implementation, slower but easy to change. `opentvp_info.py` (structure, no dependencies), `opentvp_render.py` (rendering and per-layer export, numpy + Pillow), `proto.py` (pixel decoding). New features are prototyped here, then ported to C.
 - `corpus/`: `george/` holds the scripts that generate the corpus in TVPaint; `data/` holds the resulting files, with TVPaint ground truth (`*_gt.csv`, `*_gt.layers/`, `render_*.png`). `camera_refs.json` maps each camera file to its renders.
 - `tests/`: `run_all.sh` runs everything. `check_layers.py` compares the per-layer export with ground truth (must stay at 0 failures). `check_camera.py` compares camera renders with `baseline_camera.json` (no regression).
@@ -12,7 +12,7 @@ A Les Fées Spéciales project: read `.tvpp` files (TVPaint Animation 11) withou
 
 ## Rules
 
-- C and Python outputs must stay pixel-identical (images and JSON) and print the same messages. Every change is made on both sides, or the README says which one is ahead.
+- C and Python outputs must stay pixel-identical (images and JSON) and print the same messages. Every change is made on both sides, or the README says which one is ahead. The player is C only.
 - Production files (sq…_sh… shots) never go into the repository. Test them with `tests/compare_render.py shot.tvpp refs_folder`.
 - George scripts: the output folder always goes through a `base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"` variable at the top, never hard-coded. Mind the pitfalls listed at the end of `docs/FORMAT.md`.
 - The user counts frames from 1 in the TVPaint timeline; the tools count from 0, like the project settings. Say which one every time a frame number comes up.

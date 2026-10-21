@@ -10,11 +10,16 @@ for p in windows:opentvp.exe macos:opentvp-macos linux:opentvp-linux; do
     d=dist/opentvp-$V-$plat
     mkdir -p $d
     cp c/build/$bin $d/
+    # the player (Windows and Linux only)
+    [ $plat = windows ] && cp c/build/opentvp-play.exe $d/
+    [ $plat = linux ] && cp c/build/opentvp-play-linux $d/
     cp docs/USAGE.md $d/README.md
     cp docs/LAYER_EXPORT.md $d/
     cp LICENSE $d/LICENSE.txt
     cp c/third_party/libdeflate/COPYING $d/LICENSE-libdeflate.txt
     [ $plat = linux ] && cp c/third_party/musl/COPYRIGHT $d/LICENSE-musl.txt
+    [ $plat = linux ] && cp c/third_party/x11/COPYING $d/LICENSE-x11-headers.txt
+    [ $plat != macos ] && cp c/third_party/spleen/LICENSE $d/LICENSE-spleen-font.txt
     (cd dist && $PY -c "import shutil,sys; shutil.make_archive(sys.argv[1],'zip','.',sys.argv[1])" opentvp-$V-$plat)
     rm -rf $d
 done
