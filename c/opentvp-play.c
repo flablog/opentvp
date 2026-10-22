@@ -1,15 +1,17 @@
 /*
  * opentvp-play — minimal player for TVPaint 11 files (.tvpp), without TVPaint.
  *
- *   opentvp-play file.tvpp [file2.tvpp ...] [--clip N [--frames A-B]] [--scale S] [--blur-samples N] [--threads N]
+ *   opentvp-play [file.tvpp file2.tvpp ...] [--clip N [--frames A-B]] [--canvas] [--scale S] [--blur-samples N] [--threads N]
  *
  * Plays every clip of every file in order (or only --clip N of a single file), rendered through
  * the camera with the same renderer as `opentvp render`. Frames are rendered in a background
  * thread and kept in memory; playback starts before loading is done. The timeline shows one
  * section per clip, the frames already in memory and an in/out selection. Clips hidden in
  * TVPaint are left out until H shows them. Files dropped on the window replace the timeline (top
- * half) or are appended to it (bottom half). The preview resolution (half or full) is chosen in
- * the bar and remembered. F1 shows the keyboard shortcuts, Ctrl+I the file information.
+ * half) or are appended to it (bottom half); started without a file, the window waits for some.
+ * C shows the current clip's whole canvas, outside the camera darkened. The preview resolution
+ * (half or full) is chosen in the bar and remembered. F1 shows the keyboard shortcuts, Ctrl+I the
+ * file information.
  *
  * Window layer: Win32 (GDI, OLE drag and drop) on Windows; X11 (XDND) on Linux, with libX11
  * loaded at run time (dlopen), so the binary has no build-time X11 dependency. macOS is not
@@ -31,7 +33,7 @@
 
 enum { EV_QUIT = 1, EV_KEY, EV_DOWN, EV_DOUBLE, EV_UP, EV_MOVE, EV_WHEEL, EV_REDRAW };
 enum { K_OTHER, K_SPACE, K_LEFT, K_RIGHT, K_PREV_CLIP, K_NEXT_CLIP, K_HOME, K_END, K_ESC, K_F, K_Q,
-       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN };
+       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN, K_CANVAS, K_GROW_PREV, K_GROW_NEXT };
 typedef struct { int type, key, x, y; } Event;
 
 #define EVQ 256
@@ -60,6 +62,7 @@ static int char_key(unsigned c) {
     case '\\': return K_RESET;
     case '?': return K_HELP;
     case 'h': case 'H': return K_HIDDEN;
+    case 'c': case 'C': return K_CANVAS;
     }
     return K_OTHER;
 }
@@ -106,10 +109,10 @@ static void blit(HDC dc) {
 
 /* keys that do not type a character */
 static int vk_key(WPARAM vk) {
-    int ctrl = GetKeyState(VK_CONTROL) < 0;
+    int ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
     switch (vk) {
-    case VK_LEFT: return ctrl ? K_PREV_CLIP : K_LEFT;
-    case VK_RIGHT: return ctrl ? K_NEXT_CLIP : K_RIGHT;
+    case VK_LEFT: return ctrl ? (shift ? K_GROW_PREV : K_PREV_CLIP) : K_LEFT;
+    case VK_RIGHT: return ctrl ? (shift ? K_GROW_NEXT : K_NEXT_CLIP) : K_RIGHT;
     case VK_HOME: return K_HOME;
     case VK_END: return K_END;
     case VK_ESCAPE: return K_ESC;
@@ -417,10 +420,10 @@ static void plat_resize(int w, int h) { p_XResizeWindow(g_dpy, g_win, (unsigned)
 static int x_key(XKeyEvent *k) {
     char buf[8]; KeySym ks = 0;
     int n = p_XLookupString(k, buf, sizeof buf, &ks, NULL);
-    int ctrl = (k->state & ControlMask) != 0;
+    int ctrl = (k->state & ControlMask) != 0, shift = (k->state & ShiftMask) != 0;
     switch (ks) {
-    case 0xff51: return ctrl ? K_PREV_CLIP : K_LEFT;
-    case 0xff53: return ctrl ? K_NEXT_CLIP : K_RIGHT;
+    case 0xff51: return ctrl ? (shift ? K_GROW_PREV : K_PREV_CLIP) : K_LEFT;
+    case 0xff53: return ctrl ? (shift ? K_GROW_NEXT : K_NEXT_CLIP) : K_RIGHT;
     case 0xff50: return K_HOME;
     case 0xff57: return K_END;
     case 0xff1b: return K_ESC;
@@ -604,6 +607,7 @@ static int NSEC, NFR;
 static double g_scale = 0.5;            /* preview resolution, relative to the camera */
 static int g_scale_from_cli, g_blur_samples = 8;
 static int g_show_hidden;
+static int g_canvas_all;                /* --canvas: every clip opened shows the whole canvas */
 
 /* shared with the loader thread, guarded by lock(): the sequence, frames, playhead and selection */
 static int g_cur, g_in, g_out;
@@ -619,6 +623,35 @@ static int section_of(int i) {
 }
 
 static uint32_t **slot(int i) { Section *s = sec(section_of(i)); return &s->frames[i - s->start]; }
+
+/* size of the frames in memory: the camera, or the whole canvas (C), at the preview resolution */
+static void section_size(Section *s) {
+    const Project *P = &s->F->P;
+    s->R.scale = g_scale;
+    s->R.ow = (int)((s->R.canvas ? P->width : P->out_w) * g_scale + 0.5);
+    s->R.oh = (int)((s->R.canvas ? P->height : P->out_h) * g_scale + 0.5);
+    if (s->R.ow < 1) s->R.ow = 1;
+    if (s->R.oh < 1) s->R.oh = 1;
+    s->w = s->R.ow; s->h = s->R.oh;
+}
+
+/* canvas view: darkens by half what lies outside the camera frame at frame f (first motion blur sample) */
+static void passe_partout(const Section *s, int f, uint32_t *fr) {
+    const Project *P = &s->F->P;
+    const Clip *C = s->C;
+    int N = C->visible_frames > 0 ? C->visible_frames : 1;
+    CamPt cp = camera_at_t(P, C, f / (double)(N > 1 ? N - 1 : 1));
+    Affine A = camera_affine(&cp, P->out_w, P->out_h, 1);    /* camera pixels -> canvas */
+    double det = A.a * A.e - A.b * A.d;
+    if (fabs(det) < 1e-12) return;
+    for (int y = 0; y < s->h; y++)
+        for (int x = 0; x < s->w; x++) {
+            double dx = (x + 0.5) / g_scale - A.c, dy = (y + 0.5) / g_scale - A.f;
+            double u = (A.e * dx - A.b * dy) / det, v = (-A.d * dx + A.a * dy) / det;
+            uint32_t *p = &fr[(size_t)y * s->w + x];
+            if (u < 0 || v < 0 || u >= P->out_w || v >= P->out_h) *p = (*p >> 1) & 0x7f7f7f;
+        }
+}
 
 /* rebuilds the sequence from the shown clips (caller holds the lock) */
 static void rebuild(void) {
@@ -672,6 +705,7 @@ THREAD_FN(loader) {
         }
         for (size_t p = 0; p < npx; p++)
             fr[p] = ((uint32_t)rgb[p * 3] << 16) | ((uint32_t)rgb[p * 3 + 1] << 8) | rgb[p * 3 + 2];
+        if (s->R.canvas) passe_partout(s, s->f0 + local, fr);
         lock(); s->frames[local] = fr; s->nloaded++; unlock();
     }
     free(acc); free(cover); free(rgb);
@@ -784,7 +818,8 @@ static File *load_file(const char *path, int clip, int f0, int f1, Section ***ou
         if (s->f1 < s->f0) { free(s->R.ls); free(s); continue; }
         render_background(s->C, "project", s->bg);
         s->n = s->f1 - s->f0 + 1;
-        s->w = s->R.ow; s->h = s->R.oh;
+        s->R.canvas = g_canvas_all;
+        section_size(s);
         s->fps = F->P.fps > 0 ? F->P.fps : 25;
         s->frames = xcalloc(sizeof(uint32_t *) * s->n);
         list[n++] = s;
@@ -829,15 +864,18 @@ static void apply_scale(double sc) {
     loader_stop();
     lock();
     g_scale = sc;
-    for (int k = 0; k < NALL; k++) {
-        Section *s = SECS[k];
-        free_frames(s);
-        s->R.scale = sc;
-        s->R.ow = (int)(s->F->P.out_w * sc + 0.5); s->R.oh = (int)(s->F->P.out_h * sc + 0.5);
-        if (s->R.ow < 1) s->R.ow = 1;
-        if (s->R.oh < 1) s->R.oh = 1;
-        s->w = s->R.ow; s->h = s->R.oh;
-    }
+    for (int k = 0; k < NALL; k++) { free_frames(SECS[k]); section_size(SECS[k]); }
+    unlock();
+    loader_wake();
+}
+
+/* C: the clip switches between the camera view and the whole canvas; its frames are rendered again */
+static void set_canvas(Section *s, int on) {
+    loader_stop();
+    lock();
+    free_frames(s);
+    s->R.canvas = on;
+    section_size(s);
     unlock();
     loader_wake();
 }
@@ -998,7 +1036,7 @@ static void draw_panel(const Line *L, int n) {
             if (w > lw) lw = w;
         }
     int pad = 16 * g_ui, pw = lw + 2 * pad, ph = n * lh + 2 * pad;
-    int avail = g_wh - BAR_H;
+    int avail = g_wh - (NFR ? BAR_H : 0);           /* no bar while nothing is open */
     int px = (g_ww - pw) / 2, py = (avail - ph) / 2;
     if (px < 0) px = 0;
     if (py < 0) py = 0;
@@ -1016,10 +1054,12 @@ static const char *HELP[][2] = {
     {"Left / Right", "previous / next frame (also the mouse wheel)"},
     {"Home / End", "go to the in / out point"},
     {"Ctrl + Left / Right", "play only the previous / next clip"},
+    {"Ctrl + Shift + Left / Right", "extend the selection by one clip to the left / right"},
     {"I or [", "set the in point at the current frame"},
     {"O or ]", "set the out point at the current frame"},
     {"\\", "reset in / out: play everything"},
     {"H", "show / hide the hidden clips"},
+    {"C", "current clip: whole canvas, outside the camera darkened / camera view"},
     {"F or F11", "fullscreen (or double-click the picture)"},
     {"Ctrl + I", "file information (resolution, frame rate, clips...)"},
     {"Esc", "close this panel / leave fullscreen"},
@@ -1041,7 +1081,7 @@ static void draw_help(void) {
     int n = (int)(sizeof HELP / sizeof HELP[0]);
     Line L[40];
     memset(L, 0, sizeof L);
-    for (int i = 0; i < n; i++) { L[i].cell[0] = HELP[i][0]; L[i].cell[1] = HELP[i][1]; L[i].col[1] = 21; }
+    for (int i = 0; i < n; i++) { L[i].cell[0] = HELP[i][0]; L[i].cell[1] = HELP[i][1]; L[i].col[1] = 29; }
     draw_panel(L, n);
 }
 
@@ -1083,8 +1123,8 @@ static void draw_info(void) {
     unlock();
     double dur = 0; for (int k = 0; k < NSEC; k++) dur += sec(k)->n / sec(k)->fps;
     ROW("Playback", fmt("%d clip(s), %d frames, %.2f s", NSEC, NFR, dur));
-    ROW("Preview", fmt("%d x %d (%g %%), %d / %d frames in memory, %.0f MB", cs->w, cs->h, g_scale * 100, nl, NFR,
-                       (double)bytes / (1 << 20)));
+    ROW("Preview", fmt("%d x %d (%g %%%s), %d / %d frames in memory, %.0f MB", cs->w, cs->h, g_scale * 100,
+                       cs->R.canvas ? ", whole canvas" : "", nl, NFR, (double)bytes / (1 << 20)));
     L[n++].cell[0] = "";
     static const int cols[MAXCELLS] = {0, 5, 27, 42, 53, 64, 75};
     const char *head[] = {"#", "Clip", "Frames", "Count", "Duration", "Marks", "Layers"};
@@ -1137,13 +1177,31 @@ static char g_toast[300];               /* short message above the bar, e.g. aft
 static double g_toast_until;
 static char g_title[1200];
 
-static int bar_visible(void) { return !g_fullscreen || g_bar_on || g_panel || g_menu; }
+static int bar_visible(void) { return NFR && (!g_fullscreen || g_bar_on || g_panel || g_menu); }
 
 static void toast(const char *m) { snprintf(g_toast, sizeof g_toast, "%s", m); g_toast_until = now() + 3.0; g_dirty = 1; }
 
 static void update_title(void) {
-    if (NFILES == 1) snprintf(g_title, sizeof g_title, "%s — opentvp-play", FILES[0]->base);
+    if (!NFILES) snprintf(g_title, sizeof g_title, "opentvp-play");
+    else if (NFILES == 1) snprintf(g_title, sizeof g_title, "%s — opentvp-play", FILES[0]->base);
     else snprintf(g_title, sizeof g_title, "%s + %d more — opentvp-play", FILES[0]->base, NFILES - 1);
+}
+
+/* window: the first clip at half size (at least 640 wide; 960 x 540 with no file), within 85 % of the screen */
+static void fit_window(void) {
+    int sw, sh;
+    plat_screen(&sw, &sh);
+    double ww = 960, wh = 540;
+    if (NALL) {
+        const Project *P = &SECS[0]->F->P;
+        ww = (SECS[0]->R.canvas ? P->width : P->out_w) * 0.5; wh = (SECS[0]->R.canvas ? P->height : P->out_h) * 0.5;
+        if (ww < 640) { wh *= 640 / ww; ww = 640; }
+    }
+    ww *= g_ui; wh *= g_ui;
+    double fit = 1;
+    if (ww > sw * 0.85) fit = sw * 0.85 / ww;
+    if (wh * fit > sh * 0.85 - BAR_H) fit = (sh * 0.85 - BAR_H) / wh;
+    plat_resize((int)(ww * fit), (int)(wh * fit) + (NALL ? BAR_H : 0));
 }
 
 /* counter: frame in the current clip (project numbering, from 0), then position / total (from 1) */
@@ -1214,7 +1272,8 @@ static void draw_bar(void) {
         if (k > 0) fill(sx, ly - 2 * u, new_file && NFILES > 1 ? 2 * u : u, cy + th - ly + 4 * u, new_file && NFILES > 1 ? COL_DIM : COL_SEP);
         char lab[1200];
         const char *pre = NFILES > 1 && new_file ? s->F->base : "";
-        snprintf(lab, sizeof lab, "%s%s%s (%s%d frames)", pre, *pre ? ": " : "", s->C->name, s->C->hidden ? "hidden, " : "", s->n);
+        snprintf(lab, sizeof lab, "%s%s%s (%s%s%d frames)", pre, *pre ? ": " : "", s->C->name, s->C->hidden ? "hidden, " : "",
+                 s->R.canvas ? "canvas, " : "", s->n);
         if (text_width(lab) > ex - sx - 6 * u) snprintf(lab, sizeof lab, "%s%s%s (%d)", pre, *pre ? ": " : "", s->C->name, s->n);
         uint32_t c = s->C->hidden ? COL_HIDDEN : COL_DIM;
         if (k == cur_sec) c = s->C->hidden ? 0xd8c4f0 : COL_ICON;
@@ -1254,6 +1313,16 @@ static void draw_menu(void) {
 
 /* drag over the window: top half replaces the timeline, bottom half appends */
 static void draw_drop(void) {
+    if (!NFR) {                                  /* nothing open: the whole window opens the files */
+        shade(0, 0, g_ww, g_wh);
+        frame_rect(4 * g_ui, 4 * g_ui, g_ww - 8 * g_ui, g_wh - 8 * g_ui, 3 * g_ui, COL_PLAYED);
+        g_tmul = 2;
+        text((g_ww - text_width("Open")) / 2, g_wh / 2 - font_h(), "Open", COL_ICON, 0);
+        g_tmul = 1;
+        const char *sub = "plays the dropped file(s), one after the other";
+        text((g_ww - text_width(sub)) / 2, g_wh / 2 + 6 * g_ui, sub, COL_ICON, 0);
+        return;
+    }
     int half = g_wh / 2, top = g_drag_y < half;
     for (int i = 0; i < 2; i++) {
         int y = i ? half : 0, h = i ? g_wh - half : half, on = (i == 0) == top;
@@ -1270,13 +1339,26 @@ static void draw_drop(void) {
     }
 }
 
+/* started without a file: waits for one to be dropped */
+static void draw_empty(void) {
+    int m = 24 * g_ui;
+    frame_rect(m, m, g_ww - 2 * m, g_wh - 2 * m, g_ui, COL_SEP);
+    const char *t = "Drop a .tvpp file here";
+    const char *sub = "several files play one after the other.   F1: keyboard shortcuts";
+    g_tmul = 2;
+    text((g_ww - text_width(t)) / 2, g_wh / 2 - font_h(), t, COL_ICON, 0);
+    g_tmul = 1;
+    text((g_ww - text_width(sub)) / 2, g_wh / 2 + 6 * g_ui, sub, COL_DIM, 0);
+}
+
 static void draw(void) {
-    int vh = g_fullscreen ? g_wh : g_wh - BAR_H;
+    int vh = g_fullscreen || !NFR ? g_wh : g_wh - BAR_H;
     if (vh < 1) vh = 1;
     fill(0, 0, g_ww, g_wh, 0);
     int fw, fh;
-    const uint32_t *fr = frame_at(g_cur, &fw, &fh);
-    if (fr) {
+    const uint32_t *fr = NFR ? frame_at(g_cur, &fw, &fh) : NULL;
+    if (!NFR && !g_dragfile && !g_panel) draw_empty();
+    else if (fr) {
         double s = (double)g_ww / fw < (double)vh / fh ? (double)g_ww / fw : (double)vh / fh;
         int dw = (int)(fw * s + 0.5), dh = (int)(fh * s + 0.5);
         if (dw < 1) dw = 1;
@@ -1344,6 +1426,32 @@ static void toggle_hidden(void) {
     g_dirty = 1;
 }
 
+/* Ctrl+Shift+Left / Right: the selection grows to the next clip boundary on that side */
+static void grow_selection(int dir) {
+    int a = g_in, b = g_out;
+    if (dir > 0) {
+        if (b >= NFR - 1) { toast("The selection already ends with the last clip"); return; }
+        int k = section_of(b);
+        Section *s = b == sec(k)->start + sec(k)->n - 1 ? sec(k + 1) : sec(k);   /* or the end of a partly selected clip */
+        b = s->start + s->n - 1;
+    } else {
+        if (a <= 0) { toast("The selection already starts with the first clip"); return; }
+        int k = section_of(a);
+        a = a == sec(k)->start ? sec(k - 1)->start : sec(k)->start;
+    }
+    set_inout(a, b);
+    g_dirty = 1;
+}
+
+/* C: the current clip shows the whole canvas, outside the camera darkened, or the camera view again */
+static void toggle_canvas(void) {
+    Section *s = sec(section_of(g_cur));
+    set_canvas(s, !s->R.canvas);
+    char m[300];
+    snprintf(m, sizeof m, s->R.canvas ? "%s: whole canvas, outside the camera darkened" : "%s: camera view", s->C->name);
+    toast(m);
+}
+
 static void choose_scale(double sc) {
     g_menu = 0; g_dirty = 1;
     if (fabs(sc - g_scale) < 1e-6) return;
@@ -1357,7 +1465,7 @@ static void choose_scale(double sc) {
 /* files dropped on the window (or a failed open): replace or append, keeping what works */
 static void handle_drop(void) {
     if (!g_ndrop) return;
-    int mode = g_drop_mode, np = g_ndrop;
+    int mode = NFR ? g_drop_mode : DROP_REPLACE, np = g_ndrop, was_empty = !NFR;
     char **paths = g_drop;
     g_drop = NULL; g_ndrop = 0;
     File **nf = xcalloc(sizeof(File *) * np);
@@ -1378,6 +1486,7 @@ static void handle_drop(void) {
         else if (full) g_out = NFR - 1;
         unlock();
         if (mode == DROP_REPLACE) { g_playing = 1; g_next_t = now(); }
+        if (was_empty && !g_fullscreen) fit_window();
         update_title();
         loader_wake();
         char m[900];
@@ -1400,6 +1509,7 @@ static void toggle_fullscreen(void) { plat_fullscreen(!g_fullscreen); g_bar_on =
 static void toggle_panel(int p) { g_panel = g_panel == p ? 0 : p; g_dirty = 1; }
 
 static void key(int k) {
+    if (!NFR && k != K_F && k != K_HELP && k != K_ESC && k != K_Q) return;   /* nothing open yet */
     switch (k) {
     case K_SPACE: toggle_play(); break;
     case K_LEFT: go(g_cur - 1); break;
@@ -1411,7 +1521,10 @@ static void key(int k) {
     case K_IN: set_inout(g_cur, g_out < g_cur ? NFR - 1 : g_out); g_dirty = 1; break;
     case K_OUT: set_inout(g_in > g_cur ? 0 : g_in, g_cur); g_dirty = 1; break;
     case K_RESET: set_inout(0, NFR - 1); g_dirty = 1; break;
+    case K_GROW_PREV: grow_selection(-1); break;
+    case K_GROW_NEXT: grow_selection(1); break;
     case K_HIDDEN: toggle_hidden(); break;
+    case K_CANVAS: toggle_canvas(); break;
     case K_F: toggle_fullscreen(); break;
     case K_HELP: toggle_panel(1); break;
     case K_INFO: toggle_panel(2); break;
@@ -1430,7 +1543,7 @@ static void handle(const Event *e) {
     case EV_QUIT: exit(0);
     case EV_REDRAW: g_dirty = 1; break;
     case EV_KEY: key(e->key); break;
-    case EV_WHEEL: go(g_cur + e->key); break;
+    case EV_WHEEL: if (NFR) go(g_cur + e->key); break;
     case EV_DOUBLE:
         if (!in_bar && !g_menu) { toggle_fullscreen(); break; }
         /* fall through: a quick second click on the controls is a normal click */
@@ -1472,7 +1585,7 @@ static void handle(const Event *e) {
 
 /* one playback tick: next frame of the in/out selection, looping; waits for frames not loaded yet */
 static void advance(double t) {
-    if (!g_playing || g_dragging || t < g_next_t) return;
+    if (!NFR || !g_playing || g_dragging || t < g_next_t) return;
     int nx = (g_cur >= g_out || g_cur < g_in) ? g_in : g_cur + 1;   /* outside the selection: back to the in point */
     double fps = sec(section_of(nx))->fps;
     if (frame_at(nx, NULL, NULL)) {
@@ -1491,10 +1604,12 @@ static void repaint_now(void) { draw(); g_dirty = 0; }
 static void play_usage(void) {
     const char *u =
         "opentvp-play " OPENTVP_VERSION " — plays TVPaint 11 files (.tvpp) without TVPaint\n\n"
-        "  opentvp-play file.tvpp [file2.tvpp ...] [options]\n\n"
+        "  opentvp-play [file.tvpp file2.tvpp ...] [options]\n\n"
         "  every clip of every file is played, in order; clips hidden in TVPaint: key H\n"
+        "  without a file, the window waits for .tvpp files to be dropped on it\n"
         "  --clip N            one file only: play only its clip N\n"
         "  --frames A-B        with --clip: range, from 0 (default: in/out marks, otherwise all visible content)\n"
+        "  --canvas            whole canvas without the camera framing, outside the camera darkened (key C, per clip)\n"
         "  --scale S           preview resolution for this session (the window menu saves 1 or 0.5; default 0.5)\n"
         "  --blur-samples N    motion blur samples (8)\n"
         "  --threads N         render threads (default: all cores)\n\n"
@@ -1513,20 +1628,20 @@ int main(int argc, char **argv) {
     if (own_console()) { g_own_console = 1; ShowWindow(GetConsoleWindow(), SW_HIDE); }
 #endif
     if (argc >= 2 && (!strcmp(argv[1], "--version") || !strcmp(argv[1], "version"))) { printf("opentvp-play %s\n", OPENTVP_VERSION); return 0; }
-    if (argc < 2 || !strcmp(argv[1], "-h") || !strcmp(argv[1], "--help")) { play_usage(); return 2; }
+    if (argc >= 2 && (!strcmp(argv[1], "-h") || !strcmp(argv[1], "--help"))) { play_usage(); return 2; }
     const char **paths = xcalloc(sizeof(char *) * argc);
     int npaths = 0, clip = 0, f0 = -1, f1 = -1;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--clip") && i + 1 < argc) clip = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { if (sscanf(argv[++i], "%d-%d", &f0, &f1) == 1) f1 = f0; }
+        else if (!strcmp(argv[i], "--canvas")) g_canvas_all = 1;
         else if (!strcmp(argv[i], "--scale") && i + 1 < argc) { g_scale = atof(argv[++i]); g_scale_from_cli = 1; }
         else if (!strcmp(argv[i], "--blur-samples") && i + 1 < argc) g_blur_samples = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--threads") && i + 1 < argc) g_threads = atoi(argv[++i]);
         else if (!strncmp(argv[i], "--", 2)) { fprintf(stderr, "unknown option: %s\n", argv[i]); play_usage(); return 2; }
         else paths[npaths++] = argv[i];
     }
-    if (!npaths) { play_usage(); return 2; }
-    if (clip && npaths > 1) die("--clip works with a single file");
+    if (clip && npaths != 1) die("--clip works with a single file");
     if (f0 >= 0 && !clip) die("--frames needs --clip (each clip has its own frame numbers)");
     if (!g_scale_from_cli) g_scale = load_saved_scale();
     if (g_scale <= 0) g_scale = 0.5;
@@ -1547,24 +1662,15 @@ int main(int argc, char **argv) {
                 printf("  %s: frames %d to %d%s\n", SECS[k]->C->name, SECS[k]->f0, SECS[k]->f1,
                        SECS[k]->active ? "" : " (hidden in TVPaint: key H to show it)");
     }
-    printf("%d clip(s), %d frames, preview at %g %%\n", NSEC, NFR, g_scale * 100);
+    if (NFILES) printf("%d clip(s), %d frames, preview at %g %%%s\n", NSEC, NFR, g_scale * 100, g_canvas_all ? ", whole canvas" : "");
+    else printf("no file: waiting for .tvpp files dropped on the window\n");
     fflush(stdout);
 
-    /* window: the camera at half size (at least 640 wide), within 85 % of the screen */
-    lock(); unlock();
     update_title();
     g_repaint = repaint_now;
-    int sw, sh;
     plat_open(g_title, 640, 360 + BAR_H);
-    plat_screen(&sw, &sh);
     g_ui = plat_ui_scale();
-    double ww = SECS[0]->F->P.out_w * 0.5, wh = SECS[0]->F->P.out_h * 0.5;
-    if (ww < 640) { wh *= 640 / ww; ww = 640; }
-    ww *= g_ui; wh *= g_ui;
-    double fit = 1;
-    if (ww > sw * 0.85) fit = sw * 0.85 / ww;
-    if (wh * fit > sh * 0.85 - BAR_H) fit = (sh * 0.85 - BAR_H) / wh;
-    plat_resize((int)(ww * fit), (int)(wh * fit) + BAR_H);
+    fit_window();
 
     loader_wake();
     g_next_t = now();

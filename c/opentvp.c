@@ -715,6 +715,7 @@ typedef struct {
     LayerState *ls; int nls;
     int ow, oh; double scale;
     int blur_samples;
+    int canvas;                /* the whole canvas, without the camera (player only) */
 } Renderer;
 
 typedef struct {
@@ -851,7 +852,10 @@ static void render_frame(Renderer *R, int f, float *acc, float *cover) {
     double n = N > 1 ? N - 1 : 1;
     double t0 = f / n;
     Affine aff[64]; int naff = 1;
-    if (C->blur > 0 && R->blur_samples > 1) {
+    if (R->canvas) {
+        Affine id = {1 / R->scale, 0, 0, 0, 1 / R->scale, 0};
+        aff[0] = id;
+    } else if (C->blur > 0 && R->blur_samples > 1) {
         naff = R->blur_samples > 64 ? 64 : R->blur_samples;
         for (int i = 0; i < naff; i++) {
             CamPt cp = camera_at_t(R->P, C, t0 + C->blur / n * ((double)i / (naff - 1)));

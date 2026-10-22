@@ -42,12 +42,14 @@ opentvp render file.tvpp folder --layers                one folder per layer, ev
 A separate executable, so that `opentvp` stays as small as it is: `opentvp-play.exe` (Windows) and `opentvp-play-linux` (Linux desktop, X11 or XWayland). Not available on macOS yet.
 
 ```
-opentvp-play file.tvpp [file2.tvpp ...] [--clip N [--frames A-B]] [--scale S] [--blur-samples N] [--threads N]
+opentvp-play [file.tvpp file2.tvpp ...] [--clip N [--frames A-B]] [--canvas] [--scale S] [--blur-samples N] [--threads N]
 ```
 
-It plays every clip of every file given, one after the other, in the order of the command line and then of each project, rendered through the camera exactly like `opentvp render`, in a loop at the project frame rate. Clips hidden in TVPaint are left out; **H** adds them to the timeline (purple names) or removes them again, without losing the frames already loaded. `--clip N` plays a single clip of a single file, hidden or not, and only then can `--frames` choose its range. Each clip plays its in/out marks, otherwise all its visible content. Files may have different sizes and frame rates: each clip plays at its own project frame rate. On Windows, you can also drop `.tvpp` files onto `opentvp-play.exe`.
+It plays every clip of every file given, one after the other, in the order of the command line and then of each project, rendered through the camera exactly like `opentvp render`, in a loop at the project frame rate. Clips hidden in TVPaint are left out; **H** adds them to the timeline (purple names) or removes them again, without losing the frames already loaded. `--clip N` plays a single clip of a single file, hidden or not, and only then can `--frames` choose its range. Each clip plays its in/out marks, otherwise all its visible content. Files may have different sizes and frame rates: each clip plays at its own project frame rate. On Windows, you can also drop `.tvpp` files onto `opentvp-play.exe`. Started without a file (a double-click on the executable), the window shows *Drop a .tvpp file here* and waits for files dropped on it.
 
 **Drag and drop.** Drag `.tvpp` files from the file explorer onto the player window: the window splits in two. Drop on the top half, **Replace current timeline**, to close the open files and clear the memory before opening the new ones; drop on the bottom half, **Append to timeline**, to add them after the current timeline. A file that cannot be opened is reported in a message and the rest is kept.
+
+**Whole canvas.** **C** shows the current clip without the camera framing: the whole canvas, with what lies outside the camera frame darkened by half, so the framing stays visible while the camera moves (its frame at the start of each frame, without motion blur). C again goes back to the camera view. Only that clip changes, and its frames are rendered again; its timeline name says `canvas`. `--canvas` opens every clip this way, dropped files included.
 
 **Preview resolution.** The button at the bottom left of the bar (`50%`) opens a menu: full resolution (100 %, the camera size) or half resolution (50 %, the default: 4 times faster to load and 4 times less memory). Changing it renders the frames again. The choice is remembered for the next time, in `%APPDATA%\opentvp\play.ini` (Windows) or `~/.config/opentvp/play.ini` (Linux); `--scale` overrides it for one session without saving it.
 
@@ -64,10 +66,12 @@ Frames are rendered in the background and kept in memory: playback starts with t
 | Left / Right arrows, mouse wheel | one frame back / forward |
 | Home / End | go to the in / out point |
 | Ctrl + Left / Right, click on a clip name | play only the previous / next clip (sets in / out on it) |
+| Ctrl + Shift + Left / Right | extend the in / out selection by one clip to the left / right (a partly selected clip is completed first) |
 | I or [ | in point at the current frame |
 | O or ] | out point at the current frame |
 | \ | reset in / out: play everything |
 | H | show / hide the clips hidden in TVPaint |
+| C | current clip: whole canvas with the camera frame shown / camera view |
 | Ctrl + I | file information |
 | F, F11, fullscreen button, double-click on the picture | fullscreen on / off (the picture is resized to fit) |
 | Esc | close the help or the information / leave fullscreen |

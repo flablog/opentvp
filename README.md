@@ -5,7 +5,7 @@ Read, render and export TVPaint Animation 11 files (`.tvpp`) without TVPaint, fr
 - `opentvp info shot.tvpp`: structure (resolution, frame rate, clips, layers, camera), as text or JSON.
 - `opentvp render shot.tvpp out`: final composited render, through the camera.
 - `opentvp render shot.tvpp out --layers [--keyframes]`: one folder per layer, with every frame or only the drawings, plus an exposure JSON.
-- `opentvp-play shot.tvpp [shot2.tvpp ...]`: a separate, minimal player for every clip of the files (timeline per clip, in / out, hidden clips on demand, drag and drop to replace or append, half / full resolution, fullscreen; F1 for the shortcuts, Ctrl+I for the file information), Windows and Linux.
+- `opentvp-play shot.tvpp [shot2.tvpp ...]`: a separate, minimal player for every clip of the files (timeline per clip, in / out, hidden clips on demand, drag and drop to replace or append, starts empty to receive dropped files, whole canvas view with the camera frame, half / full resolution, fullscreen; F1 for the shortcuts, Ctrl+I for the file information), Windows and Linux.
 
 The format was reverse-engineered (Les Fées Spéciales, 2026) and is documented in [`docs/FORMAT.md`](docs/FORMAT.md).
 
