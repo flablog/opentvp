@@ -35,7 +35,7 @@
 
 enum { EV_QUIT = 1, EV_KEY, EV_DOWN, EV_DOUBLE, EV_UP, EV_MOVE, EV_WHEEL, EV_REDRAW };
 enum { K_OTHER, K_SPACE, K_LEFT, K_RIGHT, K_PREV_CLIP, K_NEXT_CLIP, K_HOME, K_END, K_ESC, K_F, K_Q,
-       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN, K_CANVAS, K_GROW_PREV, K_GROW_NEXT, K_PREV_KEY, K_NEXT_KEY };
+       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN, K_CANVAS, K_GROW_PREV, K_GROW_NEXT, K_PREV_KEY, K_NEXT_KEY, K_LUMA };
 typedef struct { int type, key, x, y; } Event;
 
 #define EVQ 256
@@ -65,6 +65,7 @@ static int char_key(unsigned c) {
     case '?': return K_HELP;
     case 'h': case 'H': return K_HIDDEN;
     case 'c': case 'C': return K_CANVAS;
+    case 'l': case 'L': return K_LUMA;
     }
     return K_OTHER;
 }
@@ -1010,6 +1011,20 @@ static void shade(int x, int y, int w, int h) {
     }
 }
 
+/* L: a rectangle in grey levels, Rec. 709 luma (54 + 183 + 19 = 256) */
+static int g_luma;
+static void luminance(int x, int y, int w, int h) {
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w > g_ww ? g_ww : x + w, y1 = y + h > g_wh ? g_wh : y + h;
+    for (int j = y0; j < y1; j++) {
+        uint32_t *row = g_fb + (size_t)j * g_ww;
+        for (int i = x0; i < x1; i++) {
+            uint32_t p = row[i], l = (54 * (p >> 16 & 0xff) + 183 * (p >> 8 & 0xff) + 19 * (p & 0xff)) >> 8;
+            row[i] = l << 16 | l << 8 | l;
+        }
+    }
+}
+
 static void frame_rect(int x, int y, int w, int h, int t, uint32_t c) {
     fill(x, y, w, t, c); fill(x, y + h - t, w, t, c); fill(x, y, t, h, c); fill(x + w - t, y, t, h, c);
 }
@@ -1125,6 +1140,7 @@ static const char *HELP[][2] = {
     {"\\", "reset in / out: play everything"},
     {"H", "show / hide the hidden clips"},
     {"C", "current clip: whole canvas, outside the camera darkened / camera view"},
+    {"L", "luminance: show the pictures in grey levels / in colour"},
     {"F or F11", "fullscreen (or double-click the picture)"},
     {"Ctrl + I", "file information (resolution, frame rate, clips...)"},
     {"Esc", "close this panel / leave fullscreen"},
@@ -1448,6 +1464,7 @@ static void draw(void) {
         if (dw < 1) dw = 1;
         if (dh < 1) dh = 1;
         blit_scaled(fr, fw, fh, (g_ww - dw) / 2, (vh - dh) / 2, dw, dh);
+        if (g_luma) luminance((g_ww - dw) / 2, (vh - dh) / 2, dw, dh);
     } else {
         const char *m = "loading this frame...";
         text((g_ww - text_width(m)) / 2, (vh - font_h()) / 2, m, COL_DIM, 0);
@@ -1547,6 +1564,12 @@ static void grow_selection(int dir) {
 }
 
 /* C: the current clip shows the whole canvas, outside the camera darkened, or the camera view again */
+/* L: grey levels on display only; the frames in memory stay in colour */
+static void toggle_luma(void) {
+    g_luma = !g_luma; g_dirty = 1;
+    toast(g_luma ? "Luminance: grey levels" : "Colour");
+}
+
 static void toggle_canvas(void) {
     Section *s = sec(section_of(g_cur));
     set_canvas(s, !s->R.canvas);
@@ -1633,6 +1656,7 @@ static void key(int k) {
     }
     case K_HIDDEN: toggle_hidden(); break;
     case K_CANVAS: toggle_canvas(); break;
+    case K_LUMA: toggle_luma(); break;
     case K_F: toggle_fullscreen(); break;
     case K_HELP: toggle_panel(1); break;
     case K_INFO: toggle_panel(2); break;

@@ -75,6 +75,7 @@ Frames are rendered in the background and kept in memory: playback starts with t
 | \ | reset in / out: play everything |
 | H | show / hide the clips hidden in TVPaint |
 | C | current clip: whole canvas with the camera frame shown / camera view |
+| L | luminance: pictures shown in grey levels (Rec. 709 luma) / in colour; display only, nothing is rendered again |
 | Ctrl + I | file information |
 | F, F11, fullscreen button, double-click on the picture | fullscreen on / off (the picture is resized to fit) |
 | Esc | close the help or the information / leave fullscreen |
