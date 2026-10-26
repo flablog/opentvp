@@ -10,8 +10,10 @@
  * TVPaint are left out until H shows them. Files dropped on the window replace the timeline (top
  * half) or are appended to it (bottom half); started without a file, the window waits for some.
  * C shows the current clip's whole canvas, outside the camera darkened. The preview resolution
- * (half or full) is chosen in the bar and remembered. F1 shows the keyboard shortcuts, Ctrl+I the
- * file information.
+ * (half or full) is chosen in the bar and remembered. The keyframes (drawing changes) of each clip
+ * are found when the file is opened: Shift shows them on the timeline, snaps the playhead to them
+ * while dragging, and Shift+Left / Right jumps between them. F1 shows the keyboard shortcuts,
+ * Ctrl+I the file information.
  *
  * Window layer: Win32 (GDI, OLE drag and drop) on Windows; X11 (XDND) on Linux, with libX11
  * loaded at run time (dlopen), so the binary has no build-time X11 dependency. macOS is not
@@ -33,7 +35,7 @@
 
 enum { EV_QUIT = 1, EV_KEY, EV_DOWN, EV_DOUBLE, EV_UP, EV_MOVE, EV_WHEEL, EV_REDRAW };
 enum { K_OTHER, K_SPACE, K_LEFT, K_RIGHT, K_PREV_CLIP, K_NEXT_CLIP, K_HOME, K_END, K_ESC, K_F, K_Q,
-       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN, K_CANVAS, K_GROW_PREV, K_GROW_NEXT };
+       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN, K_CANVAS, K_GROW_PREV, K_GROW_NEXT, K_PREV_KEY, K_NEXT_KEY };
 typedef struct { int type, key, x, y; } Event;
 
 #define EVQ 256
@@ -111,8 +113,8 @@ static void blit(HDC dc) {
 static int vk_key(WPARAM vk) {
     int ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0;
     switch (vk) {
-    case VK_LEFT: return ctrl ? (shift ? K_GROW_PREV : K_PREV_CLIP) : K_LEFT;
-    case VK_RIGHT: return ctrl ? (shift ? K_GROW_NEXT : K_NEXT_CLIP) : K_RIGHT;
+    case VK_LEFT: return ctrl ? (shift ? K_GROW_PREV : K_PREV_CLIP) : (shift ? K_PREV_KEY : K_LEFT);
+    case VK_RIGHT: return ctrl ? (shift ? K_GROW_NEXT : K_NEXT_CLIP) : (shift ? K_NEXT_KEY : K_RIGHT);
     case VK_HOME: return K_HOME;
     case VK_END: return K_END;
     case VK_ESCAPE: return K_ESC;
@@ -219,6 +221,9 @@ static HRESULT STDMETHODCALLTYPE dt_drop(IDropTarget *t, IDataObject *d, DWORD k
 }
 static IDropTargetVtbl g_dt_vtbl = {dt_query, dt_addref, dt_release, dt_enter, dt_over, dt_leave, dt_drop};
 static IDropTarget g_dt = {&g_dt_vtbl};
+
+/* Shift held down while the window has the focus */
+static int plat_shift(void) { return GetForegroundWindow() == g_hwnd && GetKeyState(VK_SHIFT) < 0; }
 
 static void plat_screen(int *w, int *h) { *w = GetSystemMetrics(SM_CXSCREEN); *h = GetSystemMetrics(SM_CYSCREEN); }
 static int plat_ui_scale(void) {
@@ -332,7 +337,7 @@ int XLookupString(XKeyEvent *event, char *buffer, int bytes, KeySym *keysym, voi
     F(XInternAtom) F(XSetWMProtocols) F(XPending) F(XNextEvent) F(XCreateGC) F(XCreateImage) F(XPutImage) \
     F(XFlush) F(XLookupString) F(XSendEvent) F(XChangeProperty) F(XCreateBitmapFromData) \
     F(XCreatePixmapCursor) F(XDefineCursor) F(XUndefineCursor) F(XFreePixmap) F(XResizeWindow) \
-    F(XTranslateCoordinates) F(XConvertSelection) F(XGetWindowProperty) F(XFree)
+    F(XTranslateCoordinates) F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XQueryPointer)
 #define X11_DECL(name) static __typeof__(name) *p_##name;
 X11_FUNCS(X11_DECL)
 
@@ -358,6 +363,13 @@ static Time g_last_click;
 static int g_last_cx, g_last_cy;
 
 static void plat_screen(int *w, int *h) { *w = DisplayWidth(g_dpy, g_scr); *h = DisplayHeight(g_dpy, g_scr); }
+
+/* Shift held down (the X server's modifier state) */
+static int plat_shift(void) {
+    Window r, c; int rx, ry, wx, wy; unsigned mask = 0;
+    p_XQueryPointer(g_dpy, g_win, &r, &c, &rx, &ry, &wx, &wy, &mask);
+    return (mask & ShiftMask) != 0;
+}
 /* from the physical screen size; when the server does not know it, 2 for screens taller than 1600 px */
 static int plat_ui_scale(void) {
     int mm = DisplayHeightMM(g_dpy, g_scr), px = DisplayHeight(g_dpy, g_scr);
@@ -422,8 +434,8 @@ static int x_key(XKeyEvent *k) {
     int n = p_XLookupString(k, buf, sizeof buf, &ks, NULL);
     int ctrl = (k->state & ControlMask) != 0, shift = (k->state & ShiftMask) != 0;
     switch (ks) {
-    case 0xff51: return ctrl ? (shift ? K_GROW_PREV : K_PREV_CLIP) : K_LEFT;
-    case 0xff53: return ctrl ? (shift ? K_GROW_NEXT : K_NEXT_CLIP) : K_RIGHT;
+    case 0xff51: return ctrl ? (shift ? K_GROW_PREV : K_PREV_CLIP) : (shift ? K_PREV_KEY : K_LEFT);
+    case 0xff53: return ctrl ? (shift ? K_GROW_NEXT : K_NEXT_CLIP) : (shift ? K_NEXT_KEY : K_RIGHT);
     case 0xff50: return K_HOME;
     case 0xff57: return K_END;
     case 0xff1b: return K_ESC;
@@ -596,8 +608,39 @@ typedef struct {
     double fps;
     uint32_t **frames;        /* n entries, NULL until loaded; kept when the clip is hidden again */
     int nloaded;
+    uint8_t *keys;            /* n entries: KEY_CHANGE / KEY_NEW flags, found when the file is opened */
     int active, start;        /* part of the sequence, and its position there */
 } Section;
+
+/* keyframes: a visible layer shows another drawing than on the previous frame (KEY_CHANGE), or a
+ * drawing not shown before in the clip (KEY_NEW); the first frame of a clip is both */
+enum { KEY_CHANGE = 1, KEY_NEW = 2 };
+static int g_key_mode = KEY_CHANGE;     /* which ones Shift shows and jumps to */
+
+static void section_keys(Section *s) {
+    s->keys = xcalloc(s->n);
+    const Clip *C = s->C;
+    int *seen = xmalloc(sizeof(int) * s->n);
+    for (int l = 0; l < C->nlayers; l++) {
+        const Layer *L = &C->layers[l];
+        if (!L->visible) continue;
+        LayerState S; layer_init(&S, L, 0, 0);       /* reads the entry kinds only: no pixels */
+        int *ids = drawing_ids(&S, (int)L->count), nids = L->count > 0 ? (int)L->count : 1;
+        int prev = -2, nseen = 0;
+        for (int i = 0; i < s->n; i++) {
+            int k = frame_source(L, s->f0 + i), d = (k < 0 || k >= nids) ? -1 : ids[k];
+            if (d >= 0 && d != prev) {
+                s->keys[i] |= KEY_CHANGE;
+                int j = 0; while (j < nseen && seen[j] != d) j++;
+                if (j == nseen) { seen[nseen++] = d; s->keys[i] |= KEY_NEW; }
+            }
+            prev = d;
+        }
+        free(ids); free(S.keep); free(S.cache);
+    }
+    free(seen);
+    if (s->n) s->keys[0] |= KEY_CHANGE | KEY_NEW;
+}
 
 static File **FILES;
 static Section **SECS;                  /* individually allocated: the loader keeps pointers to them */
@@ -623,6 +666,22 @@ static int section_of(int i) {
 }
 
 static uint32_t **slot(int i) { Section *s = sec(section_of(i)); return &s->frames[i - s->start]; }
+
+static int key_at(int i) { Section *s = sec(section_of(i)); return s->keys[i - s->start] & g_key_mode; }
+
+/* next keyframe after i (dir 1) or before it (dir -1), -1 if none */
+static int next_key(int i, int dir) {
+    for (int j = i + dir; j >= 0 && j < NFR; j += dir) if (key_at(j)) return j;
+    return -1;
+}
+
+/* keyframe closest to i (the earlier one on a tie); frame 0 always is one */
+static int nearest_key(int i) {
+    if (key_at(i)) return i;
+    int a = next_key(i, -1), b = next_key(i, 1);
+    if (a < 0) return b < 0 ? i : b;
+    return b >= 0 && b - i < i - a ? b : a;
+}
 
 /* size of the frames in memory: the camera, or the whole canvas (C), at the preview resolution */
 static void section_size(Section *s) {
@@ -762,6 +821,7 @@ static void free_frames(Section *s) {
 static void free_section(Section *s) {
     free_frames(s);
     free(s->frames);
+    free(s->keys);
     for (int i = 0; i < s->R.nls; i++) {
         LayerState *L = &s->R.ls[i];
         free(L->img);
@@ -822,6 +882,7 @@ static File *load_file(const char *path, int clip, int f0, int f1, Section ***ou
         section_size(s);
         s->fps = F->P.fps > 0 ? F->P.fps : 25;
         s->frames = xcalloc(sizeof(uint32_t *) * s->n);
+        section_keys(s);
         list[n++] = s;
     }
     g_try = NULL;
@@ -928,6 +989,7 @@ static int g_ui = 1, g_tmul = 1;
 #define COL_SEP 0x5a5a5a
 #define COL_HIDDEN 0xb48ce0
 #define COL_MENU 0x2c2c2c
+#define COL_KEY 0xf0d040
 
 static void fill(int x, int y, int w, int h, uint32_t c) {
     int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
@@ -1055,6 +1117,8 @@ static const char *HELP[][2] = {
     {"Home / End", "go to the in / out point"},
     {"Ctrl + Left / Right", "play only the previous / next clip"},
     {"Ctrl + Shift + Left / Right", "extend the selection by one clip to the left / right"},
+    {"Shift + Left / Right", "previous / next keyframe (a drawing changes)"},
+    {"Shift (held)", "show the keyframes; dragging on the timeline snaps to them"},
     {"I or [", "set the in point at the current frame"},
     {"O or ]", "set the out point at the current frame"},
     {"\\", "reset in / out: play everything"},
@@ -1071,7 +1135,7 @@ static const char *HELP[][2] = {
     {"Bottom left: preview resolution (half or full), remembered for next time.", 0},
     {"Timeline: one section per clip (click a clip name to play only that clip),", 0},
     {"  light grey = frames in memory, orange brackets = in / out points,", 0},
-    {"  purple names = clips hidden in TVPaint.", 0},
+    {"  purple names = clips hidden in TVPaint, yellow dots (Shift) = keyframes.", 0},
     {"Counter: frame in the current clip (from 0, as in the project settings:", 0},
     {"  the TVPaint timeline shows +1), then position / total frames.", 0},
     {"Red play / pause button: playback has caught up with loading and is waiting.", 0},
@@ -1170,6 +1234,7 @@ static void draw_info(void) {
 /* ------------------------------------------------------------------ player */
 
 static int g_playing = 1, g_waiting, g_dragging, g_resume, g_bar_on = 1, g_dirty = 1;
+static int g_shift;                     /* Shift held: keyframes shown, the playhead snaps to them */
 static int g_panel;                     /* 0 none, 1 help (F1), 2 information (Ctrl+I) */
 static int g_menu;                      /* resolution menu open */
 static double g_next_t, g_last_move;
@@ -1177,7 +1242,7 @@ static char g_toast[300];               /* short message above the bar, e.g. aft
 static double g_toast_until;
 static char g_title[1200];
 
-static int bar_visible(void) { return NFR && (!g_fullscreen || g_bar_on || g_panel || g_menu); }
+static int bar_visible(void) { return NFR && (!g_fullscreen || g_bar_on || g_panel || g_menu || g_shift); }
 
 static void toast(const char *m) { snprintf(g_toast, sizeof g_toast, "%s", m); g_toast_until = now() + 3.0; g_dirty = 1; }
 
@@ -1263,6 +1328,17 @@ static void draw_bar(void) {
         fill(x, ty, 1, th, c);
     }
     unlock();
+    /* Shift: one dot under the track per keyframe (one per pixel column when they are dense) */
+    if (g_shift) {
+        int last = -1;
+        for (int i = 0; i < NFR; i++) {
+            if (!key_at(i)) continue;
+            int kx = pos_x(i) + (pos_x(i + 1) - pos_x(i)) / 2;
+            if (kx == last) continue;
+            fill(kx - u, ty + th + 2 * u, 3 * u, 3 * u, COL_KEY);
+            last = kx;
+        }
+    }
     /* clip sections: separators (stronger between files) and names with their frame count */
     int ly = y + 8 * u;
     for (int k = 0; k < NSEC; k++) {
@@ -1384,9 +1460,16 @@ static void draw(void) {
 
 static int clamp(int v, int a, int b) { return v < a ? a : (v > b ? b : v); }
 
+/* Shift is read from the keyboard state, not from key events: no autorepeat, no key lost with the focus */
+static void update_shift(void) {
+    int sh = NFR && plat_shift();
+    if (sh != g_shift) { g_shift = sh; g_dirty = 1; }
+}
+
 static void seek_x(int x) {
     int x0, x1; track_x(&x0, &x1);
     int i = clamp((int)((double)(x - x0) * NFR / (x1 - x0)), 0, NFR - 1);
+    if (g_shift) i = nearest_key(i);
     if (i != g_cur) { set_cur(i); g_dirty = 1; }
 }
 
@@ -1523,6 +1606,11 @@ static void key(int k) {
     case K_RESET: set_inout(0, NFR - 1); g_dirty = 1; break;
     case K_GROW_PREV: grow_selection(-1); break;
     case K_GROW_NEXT: grow_selection(1); break;
+    case K_PREV_KEY: case K_NEXT_KEY: {
+        int j = next_key(g_cur, k == K_NEXT_KEY ? 1 : -1);
+        if (j >= 0) go(j); else toast(k == K_NEXT_KEY ? "No keyframe after this frame" : "No keyframe before this frame");
+        break;
+    }
     case K_HIDDEN: toggle_hidden(); break;
     case K_CANVAS: toggle_canvas(); break;
     case K_F: toggle_fullscreen(); break;
@@ -1563,7 +1651,7 @@ static void handle(const Event *e) {
             /* clip name row: play only that clip */
             for (int k = NSEC - 1; k >= 0; k--) if (e->x >= pos_x(sec(k)->start)) { select_section(k); break; }
         } else if (e->x >= x0 - 8 * u && e->x <= x1 + 8 * u) {
-            g_dragging = 1; g_resume = g_playing; g_playing = 0; seek_x(e->x); g_dirty = 1;
+            g_dragging = 1; g_resume = g_playing; g_playing = 0; update_shift(); seek_x(e->x); g_dirty = 1;
         }
         break;
     }
@@ -1574,7 +1662,7 @@ static void handle(const Event *e) {
         lx = e->x; ly = e->y;
         g_last_move = now();
         if (!g_bar_on) { g_bar_on = 1; plat_cursor(1); g_dirty = 1; }
-        if (g_dragging) seek_x(e->x);
+        if (g_dragging) { update_shift(); seek_x(e->x); }
         break;
     }
     case EV_UP:
@@ -1681,6 +1769,7 @@ int main(int argc, char **argv) {
         Event e;
         while (ev_pop(&e)) handle(&e);
         handle_drop();
+        update_shift();
         double t = now();
         lock(); int nl = loaded_total(), running = g_loader_running; double lt = g_load_time; unlock();
         if (nl != last_loaded) { last_loaded = nl; g_dirty = 1; }

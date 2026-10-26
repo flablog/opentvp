@@ -55,7 +55,7 @@ It plays every clip of every file given, one after the other, in the order of th
 
 Frames are rendered in the background and kept in memory: playback starts with the first frames. Loading always continues from the current frame, inside the in/out selection first. **F1 shows the keyboard shortcuts in the player, Ctrl+I the file information**: canvas and camera size, frame rates (with a warning when TVPaint would resample), author and date, duration, preview resolution and memory used, every clip (range, frames, duration, marks, layers) and, for the current clip, its camera, background and any blending mode played as Color.
 
-**Timeline.** One section per clip, with its name and its number of frames (click a name to play only that clip). Light grey = frames in memory, dark = not loaded yet, blue = played. Orange brackets show the in / out points; outside them the timeline is darker and playback loops between them. When playback catches up with frames that are not loaded yet, it waits and the play / pause button turns red; the window title shows the loading percentage.
+**Timeline.** One section per clip, with its name and its number of frames (click a name to play only that clip). Light grey = frames in memory, dark = not loaded yet, blue = played. Orange brackets show the in / out points; outside them the timeline is darker and playback loops between them. When playback catches up with frames that are not loaded yet, it waits and the play / pause button turns red; the window title shows the loading percentage. Holding Shift shows the keyframes as yellow dots under the timeline: the frames where a visible layer shows another drawing than on the previous frame (a held drawing coming back after another one counts again), plus the first frame of each clip. They are found when the file is opened, without decoding any picture.
 
 **Counter.** First the frame in the current clip, counted from 0 as in the project settings (the TVPaint timeline shows +1), then the position in the whole playback / the total number of frames (counted from 1).
 
@@ -67,6 +67,8 @@ Frames are rendered in the background and kept in memory: playback starts with t
 | Home / End | go to the in / out point |
 | Ctrl + Left / Right, click on a clip name | play only the previous / next clip (sets in / out on it) |
 | Ctrl + Shift + Left / Right | extend the in / out selection by one clip to the left / right (a partly selected clip is completed first) |
+| Shift + Left / Right | previous / next keyframe |
+| Shift held | show the keyframes; clicking or dragging on the timeline snaps the playhead to the nearest one |
 | I or [ | in point at the current frame |
 | O or ] | out point at the current frame |
 | \ | reset in / out: play everything |
