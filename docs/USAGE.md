@@ -81,7 +81,7 @@ Frames are rendered in the background and kept in memory: playback starts with t
 | Q | quit |
 | F1 or ? | show / hide the shortcuts |
 
-Keys are read as typed characters, so `[`, `]` and `\` work on any keyboard layout (AltGr on AZERTY). In fullscreen, the bar and the cursor hide after 2 seconds of playback without moving the mouse.
+Keys are read as typed characters, so `[`, `]` and `\` work on any keyboard layout (AltGr on AZERTY). In fullscreen, the bar and the cursor hide after 2 seconds of playback without moving the mouse. If playback then has to wait for frames that are not loaded yet, the bar comes back on its own (red play / pause button, loading shown on the timeline) and hides again 2 seconds after playback is smooth again.
 
 In memory, a 1920×1080 camera takes ≈ 2 MB per frame at half resolution and ≈ 8 MB at full resolution; if memory runs out, the player keeps the frames already loaded and says so.
 

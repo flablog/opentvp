@@ -1244,14 +1244,20 @@ static char g_toast[300];               /* short message above the bar, e.g. aft
 static double g_toast_until;
 static char g_title[1200];
 
-static int bar_visible(void) { return NFR && (!g_fullscreen || g_bar_on || g_panel || g_menu || g_shift); }
+/* fullscreen: playback waiting for frames brings the bar back (with its red button and the loading),
+ * until 2 seconds after it plays smoothly again; the cursor stays hidden */
+static double g_last_wait = -1e9;
+static int bar_visible(void) {
+    return NFR && (!g_fullscreen || g_bar_on || g_panel || g_menu || g_shift || now() - g_last_wait < 2.0);
+}
 
 static void toast(const char *m) { snprintf(g_toast, sizeof g_toast, "%s", m); g_toast_until = now() + 3.0; g_dirty = 1; }
 
+/* the file of the current frame: with several files, the title follows the playback */
 static void update_title(void) {
     if (!NFILES) snprintf(g_title, sizeof g_title, "opentvp-play");
     else if (NFILES == 1) snprintf(g_title, sizeof g_title, "%s — opentvp-play", FILES[0]->base);
-    else snprintf(g_title, sizeof g_title, "%s + %d more — opentvp-play", FILES[0]->base, NFILES - 1);
+    else snprintf(g_title, sizeof g_title, "%s + %d more — opentvp-play", NFR ? sec(section_of(g_cur))->F->base : FILES[0]->base, NFILES - 1);
 }
 
 /* window: the first clip at half size (at least 640 wide; 960 x 540 with no file), within 85 % of the screen */
@@ -1701,7 +1707,9 @@ static void advance(double t) {
         g_next_t += 1.0 / fps;
         if (t - g_next_t > 0.25) g_next_t = t + 1.0 / fps;   /* too far behind: resync */
     } else {
-        if (!g_waiting) { g_waiting = 1; g_dirty = 1; }
+        static double since;
+        if (!g_waiting) { g_waiting = 1; g_dirty = 1; since = t; }
+        if (t - since > 1.0 / fps) g_last_wait = t;          /* late by a frame or more: shows the bar */
         g_next_t = t;
     }
 }
@@ -1793,7 +1801,8 @@ int main(int argc, char **argv) {
         lock(); int nl = loaded_total(), running = g_loader_running; double lt = g_load_time; unlock();
         if (nl != last_loaded) { last_loaded = nl; g_dirty = 1; }
         advance(t);
-        /* title: loading progress, and whether playback is waiting for it */
+        /* title: file of the current frame, loading progress, and whether playback is waiting for it */
+        update_title();
         char tt[1400];
         if (nl >= NFR || !running) snprintf(tt, sizeof tt, "%s", g_title);
         else snprintf(tt, sizeof tt, "%s — %s %d %%", g_title, g_playing && g_waiting ? "waiting for frames, loading" : "loading",
@@ -1808,6 +1817,8 @@ int main(int argc, char **argv) {
         if (g_fullscreen && g_bar_on && g_playing && !g_dragging && !g_panel && !g_menu && t - g_last_move > 2.0) {
             g_bar_on = 0; plat_cursor(0); g_dirty = 1;
         }
+        static int bar_shown;
+        if (bar_visible() != bar_shown) { bar_shown = !bar_shown; g_dirty = 1; }
         if (g_dirty) { g_dirty = 0; draw(); }
         double wait = g_playing ? g_next_t - now() : 0.015;
         int ms = (int)(wait * 1000);
