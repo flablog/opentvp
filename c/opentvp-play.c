@@ -1114,6 +1114,7 @@ static const char *HELP[][2] = {
     {"", 0},
     {"Space or K", "play / pause"},
     {"Left / Right", "previous / next frame (also the mouse wheel)"},
+    {"Drag on the picture", "move through the frames as on the timeline (pauses)"},
     {"Home / End", "go to the in / out point"},
     {"Ctrl + Left / Right", "play only the previous / next clip"},
     {"Ctrl + Shift + Left / Right", "extend the selection by one clip to the left / right"},
@@ -1235,6 +1236,7 @@ static void draw_info(void) {
 
 static int g_playing = 1, g_waiting, g_dragging, g_resume, g_bar_on = 1, g_dirty = 1;
 static int g_shift;                     /* Shift held: keyframes shown, the playhead snaps to them */
+static int g_pic_drag, g_pic_x, g_pic_cur, g_pic_moved;   /* drag on the picture: start x and frame */
 static int g_panel;                     /* 0 none, 1 help (F1), 2 information (Ctrl+I) */
 static int g_menu;                      /* resolution menu open */
 static double g_next_t, g_last_move;
@@ -1466,11 +1468,23 @@ static void update_shift(void) {
     if (sh != g_shift) { g_shift = sh; g_dirty = 1; }
 }
 
-static void seek_x(int x) {
-    int x0, x1; track_x(&x0, &x1);
-    int i = clamp((int)((double)(x - x0) * NFR / (x1 - x0)), 0, NFR - 1);
+static void seek(int i) {
+    i = clamp(i, 0, NFR - 1);
     if (g_shift) i = nearest_key(i);
     if (i != g_cur) { set_cur(i); g_dirty = 1; }
+}
+
+static void seek_x(int x) { int x0, x1; track_x(&x0, &x1); seek((int)((double)(x - x0) * NFR / (x1 - x0))); }
+
+/* drag on the picture: the horizontal movement moves the playhead as much as on the timeline;
+ * past a few pixels it pauses playback, and the playhead stays where it is released */
+static void picture_drag(int x) {
+    int x0, x1; track_x(&x0, &x1);
+    if (!g_pic_moved) {
+        if (abs(x - g_pic_x) < 4 * g_ui) return;   /* a click, or the first click of a double-click */
+        g_pic_moved = 1; g_playing = 0; g_dirty = 1;
+    }
+    seek(g_pic_cur + (int)floor((double)(x - g_pic_x) * NFR / (x1 - x0) + 0.5));
 }
 
 static void go(int i) { g_playing = 0; set_cur(clamp(i, 0, NFR - 1)); g_dirty = 1; }
@@ -1642,7 +1656,10 @@ static void handle(const Event *e) {
             else { g_menu = 0; g_dirty = 1; }
             break;
         }
-        if (!in_bar) break;
+        if (!in_bar) {
+            if (NFR && !g_dragfile) { g_pic_drag = 1; g_pic_moved = 0; g_pic_x = e->x; g_pic_cur = g_cur; }
+            break;
+        }
         int x0, x1, rx, rw; track_x(&x0, &x1); res_button(&rx, &rw);
         if (e->x < 44 * u) toggle_play();
         else if (e->x >= rx && e->x < rx + rw) { g_menu = 1; g_dirty = 1; }
@@ -1663,9 +1680,11 @@ static void handle(const Event *e) {
         g_last_move = now();
         if (!g_bar_on) { g_bar_on = 1; plat_cursor(1); g_dirty = 1; }
         if (g_dragging) { update_shift(); seek_x(e->x); }
+        else if (g_pic_drag) { update_shift(); picture_drag(e->x); }
         break;
     }
     case EV_UP:
+        g_pic_drag = 0;
         if (g_dragging) { g_dragging = 0; g_playing = g_resume; g_next_t = now() + 1.0 / sec(section_of(g_cur))->fps; g_dirty = 1; }
         break;
     }

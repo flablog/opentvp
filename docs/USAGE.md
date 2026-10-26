@@ -63,6 +63,7 @@ Frames are rendered in the background and kept in memory: playback starts with t
 |---|---|
 | Space or K, play / pause button | play / pause |
 | click or drag on the timeline | go to a frame |
+| drag left / right on the picture | move through the frames by as much as the same movement on the timeline; pauses playback, and the frame reached stays when the button is released (with Shift: snaps to the keyframes) |
 | Left / Right arrows, mouse wheel | one frame back / forward |
 | Home / End | go to the in / out point |
 | Ctrl + Left / Right, click on a clip name | play only the previous / next clip (sets in / out on it) |
