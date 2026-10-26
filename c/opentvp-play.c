@@ -136,6 +136,9 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_PAINT: { PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps); if (g_fb) blit(dc); EndPaint(h, &ps); return 0; }
     case WM_ERASEBKGND: return 1;
+    case WM_SYSCOMMAND:                          /* Alt alone would open the system menu and keep the next keys */
+        if ((wp & 0xfff0) == SC_KEYMENU) return 0;
+        break;
     case WM_SETCURSOR:
         if (LOWORD(lp) == HTCLIENT && !g_cursor_on) { SetCursor(NULL); return TRUE; }
         break;
@@ -226,6 +229,7 @@ static IDropTarget g_dt = {&g_dt_vtbl};
 
 /* Shift held down while the window has the focus */
 static int plat_shift(void) { return GetForegroundWindow() == g_hwnd && GetKeyState(VK_SHIFT) < 0; }
+static int plat_alt(void) { return GetKeyState(VK_MENU) < 0; }
 
 static void plat_screen(int *w, int *h) { *w = GetSystemMetrics(SM_CXSCREEN); *h = GetSystemMetrics(SM_CYSCREEN); }
 static int plat_ui_scale(void) {
@@ -403,12 +407,14 @@ static int g_last_cx, g_last_cy;
 
 static void plat_screen(int *w, int *h) { *w = DisplayWidth(g_dpy, g_scr); *h = DisplayHeight(g_dpy, g_scr); }
 
-/* Shift held down (the X server's modifier state) */
-static int plat_shift(void) {
+/* Shift / Alt held down (the X server's modifier state) */
+static unsigned x_mods(void) {
     Window r, c; int rx, ry, wx, wy; unsigned mask = 0;
     p_XQueryPointer(g_dpy, g_win, &r, &c, &rx, &ry, &wx, &wy, &mask);
-    return (mask & ShiftMask) != 0;
+    return mask;
 }
+static int plat_shift(void) { return (x_mods() & ShiftMask) != 0; }
+static int plat_alt(void) { return (x_mods() & Mod1Mask) != 0; }
 /* from the physical screen size; when the server does not know it, 2 for screens taller than 1600 px */
 static int plat_ui_scale(void) {
     int mm = DisplayHeightMM(g_dpy, g_scr), px = DisplayHeight(g_dpy, g_scr);
@@ -1091,6 +1097,17 @@ static void shade(int x, int y, int w, int h) {
     }
 }
 
+/* darkens a rectangle, keeping keep/256 of each channel */
+static void darken(int x, int y, int w, int h, uint32_t keep) {
+    int x0 = x < 0 ? 0 : x, y0 = y < 0 ? 0 : y;
+    int x1 = x + w > g_ww ? g_ww : x + w, y1 = y + h > g_wh ? g_wh : y + h;
+    for (int j = y0; j < y1; j++) {
+        uint32_t *row = g_fb + (size_t)j * g_ww;
+        for (int i = x0; i < x1; i++)
+            row[i] = (((row[i] & 0xff00ff) * keep >> 8) & 0xff00ff) | (((row[i] & 0x00ff00) * keep >> 8) & 0x00ff00);
+    }
+}
+
 /* L: a rectangle in grey levels, Rec. 709 luma (54 + 183 + 19 = 256) */
 static int g_luma;
 static void luminance(int x, int y, int w, int h) {
@@ -1210,6 +1227,7 @@ static const char *HELP[][2] = {
     {"Space or K", "play / pause"},
     {"Left / Right", "previous / next frame (also the mouse wheel)"},
     {"Drag on the picture", "move through the frames as on the timeline (pauses)"},
+    {"Alt + drag on the picture", "frame ruler: frames, keyframes, frame and offset"},
     {"Home / End", "go to the in / out point"},
     {"Ctrl + Left / Right", "play only the previous / next clip"},
     {"Ctrl + Shift + Left / Right", "extend the selection by one clip to the left / right"},
@@ -1334,6 +1352,8 @@ static void draw_info(void) {
 static int g_playing = 1, g_waiting, g_dragging, g_resume, g_bar_on = 1, g_dirty = 1;
 static int g_shift;                     /* Shift held: keyframes shown, the playhead snaps to them */
 static int g_pic_drag, g_pic_x, g_pic_cur, g_pic_moved;   /* drag on the picture: start x and frame */
+static int g_ruler, g_ruler_x, g_ruler_y, g_ruler_cur;    /* Alt + drag on the picture: frame ruler at the click */
+#define RULER_STEP (12 * g_ui)                             /* pixels per frame on the ruler */
 static int g_panel;                     /* 0 none, 1 help (F1), 2 information (Ctrl+I) */
 static int g_menu;                      /* resolution menu open */
 static double g_next_t, g_last_move;
@@ -1532,6 +1552,42 @@ static void draw_empty(void) {
     text((g_ww - text_width(sub)) / 2, g_wh / 2 + 6 * g_ui, sub, COL_DIM, 0);
 }
 
+/* Alt + drag on the picture: one tick per frame around the click, keyframes in yellow, clip starts
+ * long, the starting frame taller, the current frame in blue with its offset and its frame in the clip */
+static void draw_ruler(void) {
+    int u = g_ui, by = g_ruler_y;
+    g_tmul = 4; int nh = font_h(); g_tmul = 2; int oh = font_h(); g_tmul = 1;
+    int top = by - 16 * u - nh - oh, bot = by + 22 * u;      /* room for the offset and the frame number */
+    darken(0, top, g_ww, bot - top, 230);                    /* black at 10 % */
+#define RX(i) (g_ruler_x + ((i) - g_ruler_cur) * RULER_STEP)
+    int a = g_ruler_cur - g_ruler_x / RULER_STEP - 1, b = g_ruler_cur + (g_ww - g_ruler_x) / RULER_STEP + 1;
+    if (a < 0) a = 0;
+    if (b > NFR - 1) b = NFR - 1;
+    if (a > b) return;
+    fill(RX(a), by, RX(b) - RX(a) + 1, u, COL_DIM);
+    for (int i = a; i <= b; i++) {
+        int x = RX(i), k = section_of(i);
+        if (i > 0 && sec(k)->start == i) fill(x, by - 28 * u, u, bot - by + 28 * u, COL_ICON);
+        else fill(x, by - 10 * u, u, 20 * u, COL_DIM);
+        if (key_at(i)) fill(x - u, by - 6 * u, 3 * u, 12 * u, COL_KEY);
+    }
+    fill(g_ruler_x, by - 16 * u, u, 32 * u, COL_ICON);
+    int cx = RX(g_cur);
+#undef RX
+    fill(cx, top, u, bot - top, COL_PLAYED);
+    const Section *s = sec(section_of(g_cur));
+    char off[32], num[32];
+    snprintf(off, sizeof off, g_cur == g_ruler_cur ? "0" : "%+d", g_cur - g_ruler_cur);
+    snprintf(num, sizeof num, "%d", s->f0 + g_cur - s->start);
+    g_tmul = 4; int nw = text_width(num); g_tmul = 2;
+    int ow = text_width(off), w = nw > ow ? nw : ow;
+    int tx = cx + 6 * u + w > g_ww ? cx - 6 * u - w : cx + 6 * u;
+    int ny = by - 12 * u - nh, oy = ny - oh;
+    text(tx, oy, off, COL_PLAYED, 0);
+    g_tmul = 4; text(tx, ny, num, COL_PLAYED, 0);
+    g_tmul = 1;
+}
+
 static void draw(void) {
     int vh = g_fullscreen || !NFR ? g_wh : g_wh - BAR_H;
     if (vh < 1) vh = 1;
@@ -1550,6 +1606,7 @@ static void draw(void) {
         const char *m = "loading this frame...";
         text((g_ww - text_width(m)) / 2, (vh - font_h()) / 2, m, COL_DIM, 0);
     }
+    if (g_ruler && NFR) draw_ruler();
     if (bar_visible()) draw_bar();
     if (g_panel == 1) draw_help();
     if (g_panel == 2) draw_info();
@@ -1780,7 +1837,7 @@ static void handle(const Event *e) {
     case EV_KEY: key(e->key); break;
     case EV_WHEEL: if (NFR) go(g_cur + e->key); break;
     case EV_DOUBLE:
-        if (!in_bar && !g_menu) { toggle_fullscreen(); break; }
+        if (!in_bar && !g_menu && !plat_alt()) { toggle_fullscreen(); break; }
         /* fall through: a quick second click on the controls is a normal click */
     case EV_DOWN: {
         if (g_menu) {                            /* open menu: a choice, or a click elsewhere closes it */
@@ -1790,7 +1847,9 @@ static void handle(const Event *e) {
             break;
         }
         if (!in_bar) {
-            if (NFR && !g_dragfile) { g_pic_drag = 1; g_pic_moved = 0; g_pic_x = e->x; g_pic_cur = g_cur; }
+            if (!NFR || g_dragfile) break;
+            if (plat_alt()) { g_ruler = 1; g_ruler_x = e->x; g_ruler_y = e->y; g_ruler_cur = g_cur; g_playing = 0; g_dirty = 1; }
+            else { g_pic_drag = 1; g_pic_moved = 0; g_pic_x = e->x; g_pic_cur = g_cur; }
             break;
         }
         int x0, x1, rx, rw; track_x(&x0, &x1); res_button(&rx, &rw);
@@ -1814,10 +1873,16 @@ static void handle(const Event *e) {
         if (!g_bar_on) { g_bar_on = 1; plat_cursor(1); g_dirty = 1; }
         if (g_dragging) { update_shift(); seek_x(e->x); }
         else if (g_pic_drag) { update_shift(); picture_drag(e->x); }
+        else if (g_ruler) {
+            update_shift();
+            seek(g_ruler_cur + (int)floor((double)(e->x - g_ruler_x) / RULER_STEP + 0.5));
+            g_dirty = 1;
+        }
         break;
     }
     case EV_UP:
         g_pic_drag = 0;
+        if (g_ruler) { g_ruler = 0; g_dirty = 1; }
         if (g_dragging) { g_dragging = 0; g_playing = g_resume; g_next_t = now() + 1.0 / sec(section_of(g_cur))->fps; g_dirty = 1; }
         break;
     }
