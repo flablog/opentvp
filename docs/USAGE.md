@@ -77,6 +77,7 @@ Frames are rendered in the background and kept in memory: playback starts with t
 | C | current clip: whole canvas with the camera frame shown / camera view |
 | L | luminance: pictures shown in grey levels (Rec. 709 luma) / in colour; display only, nothing is rendered again |
 | Ctrl + I | file information |
+| Ctrl + C | copy the current frame to the clipboard, as shown: preview resolution, camera or canvas view, grey levels with L (Windows: image and PNG, still there after quitting; Linux: PNG, available while the player is open unless a clipboard manager keeps it) |
 | F, F11, fullscreen button, double-click on the picture | fullscreen on / off (the picture is resized to fit) |
 | Esc | close the help or the information / leave fullscreen |
 | Q | quit |

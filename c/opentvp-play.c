@@ -35,7 +35,7 @@
 
 enum { EV_QUIT = 1, EV_KEY, EV_DOWN, EV_DOUBLE, EV_UP, EV_MOVE, EV_WHEEL, EV_REDRAW };
 enum { K_OTHER, K_SPACE, K_LEFT, K_RIGHT, K_PREV_CLIP, K_NEXT_CLIP, K_HOME, K_END, K_ESC, K_F, K_Q,
-       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN, K_CANVAS, K_GROW_PREV, K_GROW_NEXT, K_PREV_KEY, K_NEXT_KEY, K_LUMA };
+       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN, K_CANVAS, K_GROW_PREV, K_GROW_NEXT, K_PREV_KEY, K_NEXT_KEY, K_LUMA, K_COPY };
 typedef struct { int type, key, x, y; } Event;
 
 #define EVQ 256
@@ -122,6 +122,7 @@ static int vk_key(WPARAM vk) {
     case VK_F1: return K_HELP;
     case VK_F11: return K_F;
     case 'I': return ctrl ? K_INFO : K_OTHER;   /* plain I arrives as a character */
+    case 'C': return ctrl ? K_COPY : K_OTHER;
     }
     return K_OTHER;
 }
@@ -304,6 +305,40 @@ static void plat_cursor(int on) {
     POINT p; GetCursorPos(&p); SetCursorPos(p.x, p.y);   /* triggers WM_SETCURSOR */
 }
 
+/* Ctrl+C: rgb (w x h, 3 bytes per pixel) to the clipboard, as a DIB and as PNG (kept by Windows after we quit) */
+static HGLOBAL global_copy(const void *p, size_t n) {
+    HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE, n);
+    if (g) { memcpy(GlobalLock(g), p, n); GlobalUnlock(g); }
+    return g;
+}
+static int plat_copy_image(const uint8_t *rgb, int w, int h) {
+    size_t stride = ((size_t)w * 3 + 3) & ~(size_t)3, n = sizeof(BITMAPINFOHEADER) + stride * h;
+    uint8_t *dib = xcalloc(n);
+    BITMAPINFOHEADER *bh = (BITMAPINFOHEADER *)dib;
+    bh->biSize = sizeof *bh; bh->biWidth = w; bh->biHeight = h;          /* bottom-up */
+    bh->biPlanes = 1; bh->biBitCount = 24; bh->biCompression = BI_RGB; bh->biSizeImage = (DWORD)(stride * h);
+    for (int y = 0; y < h; y++) {
+        const uint8_t *s = rgb + (size_t)y * w * 3;
+        uint8_t *d = dib + sizeof *bh + (size_t)(h - 1 - y) * stride;
+        for (int x = 0; x < w; x++) { d[x * 3] = s[x * 3 + 2]; d[x * 3 + 1] = s[x * 3 + 1]; d[x * 3 + 2] = s[x * 3]; }
+    }
+    Bytes png = {0, 0, 0};
+    png_encode(&png, rgb, w, h, 3);
+    HGLOBAL gd = global_copy(dib, n), gp = global_copy(png.d, png.n);
+    free(dib); free(png.d);
+    int ok = 0;
+    if (gd && OpenClipboard(g_hwnd)) {
+        EmptyClipboard();
+        ok = SetClipboardData(CF_DIB, gd) != NULL;
+        if (ok) gd = NULL;
+        if (gp && SetClipboardData(RegisterClipboardFormatW(L"PNG"), gp)) gp = NULL;
+        CloseClipboard();
+    }
+    if (gd) GlobalFree(gd);
+    if (gp) GlobalFree(gp);
+    return ok;
+}
+
 static double now(void) {
     static LARGE_INTEGER f; LARGE_INTEGER c;
     if (!f.QuadPart) QueryPerformanceFrequency(&f);
@@ -338,7 +373,8 @@ int XLookupString(XKeyEvent *event, char *buffer, int bytes, KeySym *keysym, voi
     F(XInternAtom) F(XSetWMProtocols) F(XPending) F(XNextEvent) F(XCreateGC) F(XCreateImage) F(XPutImage) \
     F(XFlush) F(XLookupString) F(XSendEvent) F(XChangeProperty) F(XCreateBitmapFromData) \
     F(XCreatePixmapCursor) F(XDefineCursor) F(XUndefineCursor) F(XFreePixmap) F(XResizeWindow) \
-    F(XTranslateCoordinates) F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XQueryPointer)
+    F(XTranslateCoordinates) F(XConvertSelection) F(XGetWindowProperty) F(XFree) F(XQueryPointer) \
+    F(XSetSelectionOwner) F(XMaxRequestSize) F(XExtendedMaxRequestSize)
 #define X11_DECL(name) static __typeof__(name) *p_##name;
 X11_FUNCS(X11_DECL)
 
@@ -359,6 +395,8 @@ static Atom a_delete, a_state, a_fullscreen, a_name, a_utf8;
 static Atom a_dnd_aware, a_dnd_enter, a_dnd_position, a_dnd_status, a_dnd_leave, a_dnd_drop, a_dnd_finished,
             a_dnd_selection, a_dnd_copy, a_uri_list, a_drop_prop;
 static Window g_dnd_source;            /* XDND: window of the application that drags files over us */
+static Atom a_clipboard, a_targets, a_png;
+static Bytes g_clip;                   /* PNG we offer on CLIPBOARD, while we own it */
 static Cursor g_blank;
 static Time g_last_click;
 static int g_last_cx, g_last_cy;
@@ -413,6 +451,9 @@ static void plat_open(const char *title, int w, int h) {
     a_dnd_copy = p_XInternAtom(g_dpy, "XdndActionCopy", False);
     a_uri_list = p_XInternAtom(g_dpy, "text/uri-list", False);
     a_drop_prop = p_XInternAtom(g_dpy, "OPENTVP_DROP", False);
+    a_clipboard = p_XInternAtom(g_dpy, "CLIPBOARD", False);
+    a_targets = p_XInternAtom(g_dpy, "TARGETS", False);
+    a_png = p_XInternAtom(g_dpy, "image/png", False);
     long version = 5;
     p_XChangeProperty(g_dpy, g_win, a_dnd_aware, 4 /* XA_ATOM */, 32, PropModeReplace, (unsigned char *)&version, 1);
     g_gc = p_XCreateGC(g_dpy, g_win, 0, NULL);
@@ -443,8 +484,41 @@ static int x_key(XKeyEvent *k) {
     case 0xffbe: return K_HELP;                  /* F1 */
     case 0xffc8: return K_F;                     /* F11 */
     case 'i': case 'I': if (ctrl) return K_INFO; break;
+    case 'c': case 'C': if (ctrl) return K_COPY; break;
     }
     return n == 1 ? char_key((unsigned char)buf[0]) : K_OTHER;
+}
+
+/* Ctrl+C: we own CLIPBOARD and hand out the PNG when an application pastes. X11 keeps nothing:
+ * the image can be pasted while the player is open (or after, with a clipboard manager) */
+static int plat_copy_image(const uint8_t *rgb, int w, int h) {
+    free(g_clip.d); memset(&g_clip, 0, sizeof g_clip);
+    png_encode(&g_clip, rgb, w, h, 3);
+    long maxreq = p_XExtendedMaxRequestSize(g_dpy);
+    if (!maxreq) maxreq = p_XMaxRequestSize(g_dpy);
+    if (g_clip.n + 1024 > (size_t)maxreq * 4) { free(g_clip.d); memset(&g_clip, 0, sizeof g_clip); return 0; }   /* no INCR */
+    p_XSetSelectionOwner(g_dpy, a_clipboard, g_win, CurrentTime);
+    p_XFlush(g_dpy);
+    return 1;
+}
+
+static void clip_request(XSelectionRequestEvent *q) {
+    XEvent r;
+    memset(&r, 0, sizeof r);
+    r.xselection.type = SelectionNotify; r.xselection.requestor = q->requestor; r.xselection.selection = q->selection;
+    r.xselection.target = q->target; r.xselection.time = q->time;
+    Atom prop = q->property ? q->property : q->target;    /* obsolete clients give no property */
+    r.xselection.property = None;
+    if (g_clip.n && q->target == a_targets) {
+        Atom t[2] = {a_targets, a_png};
+        p_XChangeProperty(g_dpy, q->requestor, prop, 4 /* XA_ATOM */, 32, PropModeReplace, (unsigned char *)t, 2);
+        r.xselection.property = prop;
+    } else if (g_clip.n && q->target == a_png) {
+        p_XChangeProperty(g_dpy, q->requestor, prop, a_png, 8, PropModeReplace, g_clip.d, (int)g_clip.n);
+        r.xselection.property = prop;
+    }
+    p_XSendEvent(g_dpy, q->requestor, False, NoEventMask, &r);
+    p_XFlush(g_dpy);
 }
 
 /* XDND: message to the drag source */
@@ -503,6 +577,12 @@ static void plat_pump(void) {
                 p_XConvertSelection(g_dpy, a_dnd_selection, a_uri_list, a_drop_prop, g_win, (Time)e.xclient.data.l[2]);
                 g_dragfile = 0; ev_push(EV_REDRAW, 0, 0, 0);
             } else if ((Atom)e.xclient.data.l[0] == a_delete) ev_push(EV_QUIT, 0, 0, 0);
+            break;
+        case SelectionRequest:                       /* an application pastes what Ctrl+C copied */
+            if (e.xselectionrequest.selection == a_clipboard) clip_request(&e.xselectionrequest);
+            break;
+        case SelectionClear:                         /* another application copied something */
+            if (e.xselectionclear.selection == a_clipboard) { free(g_clip.d); memset(&g_clip, 0, sizeof g_clip); }
             break;
         case SelectionNotify:                        /* XDND: the dropped file list */
             if (e.xselection.property == a_drop_prop) {
@@ -1143,6 +1223,7 @@ static const char *HELP[][2] = {
     {"L", "luminance: show the pictures in grey levels / in colour"},
     {"F or F11", "fullscreen (or double-click the picture)"},
     {"Ctrl + I", "file information (resolution, frame rate, clips...)"},
+    {"Ctrl + C", "copy the current frame to the clipboard (preview resolution)"},
     {"Esc", "close this panel / leave fullscreen"},
     {"Q", "quit"},
     {"F1 or ?", "show / hide this help"},
@@ -1570,6 +1651,27 @@ static void toggle_luma(void) {
     toast(g_luma ? "Luminance: grey levels" : "Colour");
 }
 
+/* Ctrl+C: the current frame as it is in memory (preview resolution, grey levels with L) to the clipboard */
+static void copy_frame(void) {
+    int w, h;
+    const uint32_t *fr = frame_at(g_cur, &w, &h);
+    if (!fr) { toast("This frame is not loaded yet: nothing copied"); return; }
+    uint8_t *rgb = xmalloc((size_t)w * h * 3);
+    for (size_t p = 0; p < (size_t)w * h; p++) {
+        uint32_t r = fr[p] >> 16 & 0xff, g = fr[p] >> 8 & 0xff, b = fr[p] & 0xff;
+        if (g_luma) r = g = b = (54 * r + 183 * g + 19 * b) >> 8;
+        rgb[p * 3] = (uint8_t)r; rgb[p * 3 + 1] = (uint8_t)g; rgb[p * 3 + 2] = (uint8_t)b;
+    }
+    int ok = plat_copy_image(rgb, w, h);
+    free(rgb);
+    const Section *s = sec(section_of(g_cur));
+    char m[400];
+    if (ok) snprintf(m, sizeof m, "Frame %d of %s copied (%d x %d%s)", s->f0 + g_cur - s->start, s->C->name, w, h,
+                     g_luma ? ", grey levels" : "");
+    else snprintf(m, sizeof m, "Could not copy the frame to the clipboard");
+    toast(m);
+}
+
 static void toggle_canvas(void) {
     Section *s = sec(section_of(g_cur));
     set_canvas(s, !s->R.canvas);
@@ -1657,6 +1759,7 @@ static void key(int k) {
     case K_HIDDEN: toggle_hidden(); break;
     case K_CANVAS: toggle_canvas(); break;
     case K_LUMA: toggle_luma(); break;
+    case K_COPY: copy_frame(); break;
     case K_F: toggle_fullscreen(); break;
     case K_HELP: toggle_panel(1); break;
     case K_INFO: toggle_panel(2); break;
