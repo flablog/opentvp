@@ -5,12 +5,11 @@
  *   opentvp render file.tvpp folder [--clip N] [--frames A-B] [--bg project|transparent|#RRGGBB]
  *                                 [--scale S] [--blur-samples N] [--threads N] [--prefix NAME]
  *
- * Format reverse-engineered (Les Fées Spéciales, 2026), validated against
+ * Format reverse-engineered (Flavio Perez, 2026), validated against
  * TVPaint 11.7 renders. Dependency: libdeflate (MIT), for decompressing
  * ZCHK chunks and compressing PNGs.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Copyright (C) 2026 Les Fées Spéciales
  */
 #define _FILE_OFFSET_BITS 64
 #ifndef OPENTVP_VERSION

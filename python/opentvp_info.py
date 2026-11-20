@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Les Fées Spéciales
 """opentvp_info — prints the structure of a TVPaint file (.tvpp) without TVPaint.
 
 Usage:
@@ -10,7 +9,7 @@ Usage:
 No dependencies: Python 3.8+ standard library only.
 Does not decode pixels: reading is near-instant, even on large shots.
 
-Format reverse-engineered on TVPaint Animation 11.7 (Les Fées Spéciales).
+Format reverse-engineered on TVPaint Animation 11.7 (Flavio Perez).
 """
 import json
 import math

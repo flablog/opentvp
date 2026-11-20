@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Les Fées Spéciales
 """.tvpp decoder prototype — layers and pixels (TVPaint 11.7)."""
 import struct, sys, re
 

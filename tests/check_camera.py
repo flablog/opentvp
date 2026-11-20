@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Les Fées Spéciales
 """Final render (through the camera) compared with the TVPaint renders of the camera corpus.
 
 The camera model is not pixel-exact (see docs/FORMAT.md): each case has a baseline

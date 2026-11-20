@@ -20,7 +20,6 @@
  * supported yet.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
- * Copyright (C) 2026 Les Fées Spéciales
  */
 #define OPENTVP_NO_MAIN
 #include "opentvp.c"

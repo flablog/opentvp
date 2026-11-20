@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Les Fées Spéciales
 """Helpers shared by the tests: run the C or Python implementation, read TVPaint ground truth."""
 import glob
 import os

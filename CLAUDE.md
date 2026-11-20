@@ -1,6 +1,6 @@
 # opentvp — reading and rendering TVPaint files without TVPaint
 
-A Les Fées Spéciales project: read `.tvpp` files (TVPaint Animation 11) without TVPaint, to render and export shots on a headless server. The format was reverse-engineered: **read `docs/FORMAT.md` before touching decoding or rendering.**
+A personal project of Flavio Perez (not a Les Fées Spéciales project, see the README): read `.tvpp` files (TVPaint Animation 11) without TVPaint, to render and export shots on a headless server. The format was reverse-engineered: **read `docs/FORMAT.md` before touching decoding or rendering.**
 
 ## Layout
 

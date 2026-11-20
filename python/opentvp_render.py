@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Copyright (C) 2026 Les Fées Spéciales
 """opentvp_render — composited render of a TVPaint clip (.tvpp) without TVPaint.
 
 Usage:
