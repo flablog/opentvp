@@ -1,0 +1,45 @@
+# GitHub counterpart of .gitlab-ci.yml (each platform ignores the other's file).
+# Runs only when a vX.Y.Z tag (matching the VERSION file) is pushed: tests, then builds
+# every platform and publishes a GitHub release with the zips attached.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+      - run: pip install -r python/requirements.txt
+      - run: ./tests/run_all.sh
+
+  release:
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+      - name: Tag matches VERSION
+        run: test "v$(cat VERSION)" = "${{ github.ref_name }}"
+      - run: pip install -r python/requirements.txt ziglang==0.17.0
+      - run: ./c/build.sh all
+      - run: ./c/package.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: opentvp ${{ github.ref_name }}
+          body: "opentvp ${{ github.ref_name }}: Windows, macOS (universal) and Linux (static) binaries, plus the Python version."
+          files: dist/*.zip
