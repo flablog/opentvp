@@ -38,8 +38,12 @@ jobs:
       - run: pip install -r python/requirements.txt ziglang==0.17.0
       - run: ./c/build.sh all
       - run: ./c/package.sh
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v v="$(cat VERSION)" '/^## /{p = index($0, "## " v " ") == 1; next} p' CHANGELOG.md > notes.md
+          test -s notes.md
       - uses: softprops/action-gh-release@v2
         with:
           name: opentvp ${{ github.ref_name }}
-          body: "opentvp ${{ github.ref_name }}: Windows, macOS (universal) and Linux (static) binaries, plus the Python version."
+          body_path: notes.md
           files: dist/*.zip
