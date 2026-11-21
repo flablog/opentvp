@@ -9,7 +9,7 @@
  * TVPaint 11.7 renders. Dependency: libdeflate (MIT), for decompressing
  * ZCHK chunks and compressing PNGs.
  *
- * SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-License-Identifier: CC0-1.0
  */
 #define _FILE_OFFSET_BITS 64
 #ifndef OPENTVP_VERSION

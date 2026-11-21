@@ -2,6 +2,11 @@
 
 Versions follow the `VERSION` file; a release is a `vX.Y.Z` tag. Frame numbers here count from 0, like the project settings (the TVPaint timeline shows +1).
 
+## Unreleased
+
+### Changed
+- License: public domain (CC0 1.0) instead of the GPL v3 or later. Releases up to 0.4.0 stay available under the GPL.
+
 ## 0.4.0 — 2026-11-20
 
 ### Added

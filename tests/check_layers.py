@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: CC0-1.0
 """Layer-by-layer export (--layers --keyframes) compared with TVPaint's structure export
 (tv_ClipSaveStructure: CSV + one PNG per instance) over the whole corpus.
 Checks pixel decoding, holds, instances, pre/post behaviours.

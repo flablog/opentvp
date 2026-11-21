@@ -23,7 +23,7 @@ That said, being able to query and export TVPaint files is something we, as a st
 
 I hope the TVPaint developers can take into account, in their future versions, the needs this exporter brings to light.
 
-This code is free software: do what you like with it, within the terms of its license (below).
+This code is in the public domain (CC0): do what you like with it.
 
 Happy animating!
 
@@ -60,6 +60,6 @@ C and Python share the same version: a release contains both.
 
 ## License
 
-GPL v3 or later (`GPL-3.0-or-later`), see [LICENSE](LICENSE). Written by Flavio Perez.
+Public domain: [CC0 1.0 Universal](LICENSE) (`CC0-1.0`). Written by Flavio Perez, who waives all copyright and related rights to this work, to the extent possible under law. Versions up to 0.4.0 were published under the GPL v3 or later.
 
-Third-party code built into the binary: libdeflate (MIT, `c/third_party/libdeflate/COPYING`); for the static Linux binary, musl (MIT, `c/third_party/musl/COPYRIGHT`); for the player, the Spleen bitmap font (BSD 2-clause, `c/third_party/spleen/LICENSE`) and, on Linux, the X11 headers (MIT, `c/third_party/x11/COPYING`; libX11 itself is loaded at run time). The licenses are included in the release archives. Python dependencies: numpy (BSD), Pillow (MIT-CMU).
+The third-party code below keeps its own license, and its notices must be kept with any copy. Third-party code built into the binary: libdeflate (MIT, `c/third_party/libdeflate/COPYING`); for the static Linux binary, musl (MIT, `c/third_party/musl/COPYRIGHT`); for the player, the Spleen bitmap font (BSD 2-clause, `c/third_party/spleen/LICENSE`) and, on Linux, the X11 headers (MIT, `c/third_party/x11/COPYING`; libX11 itself is loaded at run time). The licenses are included in the release archives. Python dependencies: numpy (BSD), Pillow (MIT-CMU).

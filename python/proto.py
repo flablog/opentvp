@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: CC0-1.0
 """.tvpp decoder prototype — layers and pixels (TVPaint 11.7)."""
 import struct, sys, re
 

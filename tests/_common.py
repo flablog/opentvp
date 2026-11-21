@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: CC0-1.0
 """Helpers shared by the tests: run the C or Python implementation, read TVPaint ground truth."""
 import glob
 import os

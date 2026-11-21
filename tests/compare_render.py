@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: CC0-1.0
 """Render of a production shot compared with a folder of TVPaint renders (files kept out of the repository).
 
     python tests/compare_render.py shot.tvpp refs_folder [--impl c|python] [--pattern ref_{:04d}.png] [--frames A-B]

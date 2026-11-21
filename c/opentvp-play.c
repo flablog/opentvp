@@ -19,7 +19,7 @@
  * loaded at run time (dlopen), so the binary has no build-time X11 dependency. macOS is not
  * supported yet.
  *
- * SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-License-Identifier: CC0-1.0
  */
 #define OPENTVP_NO_MAIN
 #include "opentvp.c"

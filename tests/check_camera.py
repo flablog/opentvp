@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: CC0-1.0
 """Final render (through the camera) compared with the TVPaint renders of the camera corpus.
 
 The camera model is not pixel-exact (see docs/FORMAT.md): each case has a baseline

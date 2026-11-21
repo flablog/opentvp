@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: CC0-1.0
 """opentvp_render — composited render of a TVPaint clip (.tvpp) without TVPaint.
 
 Usage:
