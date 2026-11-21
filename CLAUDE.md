@@ -17,7 +17,10 @@ A personal project of Flavio Perez (not a Les Fées Spéciales project, see the 
 - George scripts: the output folder always goes through a `base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"` variable at the top, never hard-coded. Mind the pitfalls listed at the end of `docs/FORMAT.md`.
 - The user counts frames from 1 in the TVPaint timeline; the tools count from 0, like the project settings. Say which one every time a frame number comes up.
 - Project language: English (messages, docs, comments). Corpus folder names and George scripts stay in French. The user may write in French.
-- Version: `VERSION` file at the root, injected into the binary and read by the Python. A release = a `vX.Y.Z` tag; CI builds and publishes the binaries.
+- Version: `VERSION` file at the root, injected into the binary and read by the Python. Every user-visible change gets a line under `## Unreleased` in `CHANGELOG.md`.
+- Release: rename `Unreleased` to `X.Y.Z — date`, bump `VERSION`, commit, then push a `vX.Y.Z` tag. Only tags trigger the GitHub CI (`.github/workflows/ci.yml`: tests, build, release whose notes are the version's changelog section); `.gitlab-ci.yml` is kept for a GitLab mirror. No release for doc-only changes.
+- Git: GitHub `flablog/opentvp`, `main` is the published branch. Features are developed on their own branch (`player`, `writer`) and reach `main` only when the user says so.
+- License: public domain, CC0 1.0. New files start with `SPDX-License-Identifier: CC0-1.0`, no copyright line. Third-party code under `c/third_party/` keeps its own license and notices.
 
 ## Open leads
 
