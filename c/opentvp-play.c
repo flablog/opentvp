@@ -1434,9 +1434,10 @@ static const char *HELP[][2] = {
     {"", 0},
     {"Drop .tvpp files on the window: top half replaces the timeline,", 0},
     {"  bottom half appends them to it.", 0},
-    {"Bottom left: preview resolution (half or full), then the sound button: volume,", 0},
-    {"  scrub sound (each frame shown while paused or scrubbing plays its own sound)", 0},
-    {"  and mute; the mouse wheel over it sets the volume. All are remembered.", 0},
+    {"Bottom left: preview resolution (half or full). Bottom right, before fullscreen:", 0},
+    {"  the sound button: volume, scrub sound (each frame shown while paused or", 0},
+    {"  scrubbing plays its own sound) and mute; the mouse wheel over it sets the", 0},
+    {"  volume. All are remembered.", 0},
     {"Timeline: one section per clip (click a clip name to play only that clip),", 0},
     {"  light grey = frames in memory, orange brackets = in / out points,", 0},
     {"  purple names = clips hidden in TVPaint, yellow dots (Shift) = keyframes.", 0},
@@ -1611,8 +1612,8 @@ static int counter_w(void) {
 static int bar_top(void) { return g_wh - BAR_H; }
 static int track_cy(void) { return bar_top() + 42 * g_ui; }
 static void res_button(int *x, int *w) { *x = 46 * g_ui; *w = text_width("100%") + 20 * g_ui; }
-/* sound button (speaker and arrow), after the resolution button */
-static void snd_button(int *x, int *w) { int rx, rw; res_button(&rx, &rw); *x = rx + rw + 8 * g_ui; *w = 40 * g_ui; }
+/* sound button (speaker and arrow), on the right: between the frame counters and the fullscreen button */
+static void snd_button(int *x, int *w) { *w = 40 * g_ui; *x = g_ww - 52 * g_ui - *w; }
 /* sound panel above it: "Volume", a vertical slider from sy0 (100 %) to sy1 (0 %), then the
  * "Scrub sound" row at sr and the "Mute (M)" row at my (both mh high) */
 static void vmenu_rect(int *x, int *y, int *w, int *h, int *sy0, int *sy1, int *sr, int *my) {
@@ -1620,13 +1621,13 @@ static void vmenu_rect(int *x, int *y, int *w, int *h, int *sy0, int *sy1, int *
     int th = font_h() + 12 * u, sh = 110 * u, mh = font_h() + 14 * u;
     *w = text_width("Scrub sound") + 48 * u;
     *h = th + sh + 2 * mh;
-    *x = bx + bw / 2 - *w / 2; if (*x < 4 * u) *x = 4 * u;
+    *x = bx + bw / 2 - *w / 2; if (*x + *w > g_ww - 4 * u) *x = g_ww - 4 * u - *w; if (*x < 4 * u) *x = 4 * u;
     *y = bar_top() - *h - 4 * u;
     *sy0 = *y + th + 8 * u; *sy1 = *y + th + sh - 8 * u; *sr = *y + th + sh; *my = *sr + mh;
 }
 static void track_x(int *x0, int *x1) {
-    int bx, bw; snd_button(&bx, &bw);
-    *x0 = bx + bw + 14 * g_ui; *x1 = g_ww - 56 * g_ui - counter_w();
+    int rx, rw, bx, bw; res_button(&rx, &rw); snd_button(&bx, &bw);
+    *x0 = rx + rw + 14 * g_ui; *x1 = bx - 20 * g_ui - counter_w();
     if (*x1 < *x0 + 10) *x1 = *x0 + 10;
 }
 static int pos_x(int i) { int x0, x1; track_x(&x0, &x1); return x0 + (int)((double)(x1 - x0) * i / NFR); }
@@ -1723,7 +1724,7 @@ static void draw_bar(void) {
     fill(px - u, cy - 8 * u, 3 * u, 16 * u, COL_ICON);
     /* counter */
     char b[64]; counter_text(b, sizeof b, g_cur);
-    text(g_ww - 48 * u - counter_w(), cy - font_h() / 2, b, COL_ICON, 0);
+    { int bx, bw; snd_button(&bx, &bw); text(bx - 12 * u - counter_w(), cy - font_h() / 2, b, COL_ICON, 0); }
     /* fullscreen button: four corners */
     int fx = g_ww - 36 * u, fy = cy - 9 * u, a = 6 * u, t = 2 * u, e = 18 * u;
     uint32_t c = COL_ICON;
