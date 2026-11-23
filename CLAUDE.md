@@ -28,6 +28,6 @@ A personal project of Flavio Perez (not a Les Fées Spéciales project, see the 
 - Residual camera model error (≤ 0.7 % of the movement).
 - Validation of blending modes other than Color; unsupported modes (Shade, Light, Hue, Colorize, SoftLight…).
 - TVPaint 12: regenerate the corpus with the same scripts and compare.
-- Sound (`docs/FORMAT.md` §8): info and WAV export done. To do: playback in the player; fade-out direction not measured yet; project tracks are left out like TVPaint's clip export (whole-project export not studied); WAV sources only.
+- Sound (`docs/FORMAT.md` §8): info and WAV export done. Player: plays each clip's mix (audio thread, cued on the displayed frame). To do: fade-out direction not measured yet; project tracks are left out like TVPaint's clip export (whole-project export not studied); WAV sources only.
 - Reference and folder layers: not studied.
 - After Effects import (ExtendScript reading the exposure JSON).

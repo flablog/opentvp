@@ -1544,12 +1544,10 @@ static double snd_envelope(double s, const double fin[2], const double fout[2]) 
     return g;
 }
 
-/* writes the clip's mix (frames f0..f1, from 0) to path; returns 0 (nothing written) without tracks */
-static int export_sound(const Project *P, const Clip *C, int f0, int f1, const char *path) {
-    if (P->sound.n)
-        printf("  sound: %d project track(s) left out (TVPaint does not export them with a clip)\n", P->sound.n);
+/* mix of the clip's tracks over frames f0..f1 (from 0): n x 2 doubles at SND_RATE; also used by
+ * the player. Prints the same messages as the Python (muted clip, missing or unreadable files). */
+static double *sound_mix(const Project *P, const Clip *C, int f0, int f1, long long *pn, int *pmixed) {
     const Sound *S = &C->sound;
-    if (!S->n) { printf("  sound: the clip has no sound track, no WAV written\n"); return 0; }
     long long n = (long long)rint((double)((long long)(f1 - f0 + 1) * SND_RATE) / P->fps);
     if (n < 0) n = 0;
     double *out = xcalloc(sizeof(double) * 2 * (size_t)(n ? n : 1));
@@ -1588,6 +1586,17 @@ static int export_sound(const Project *P, const Clip *C, int f0, int f1, const c
         free(W.x); free(mp);
     }
     for (int k = 0; k < S->n; k++) if (!S->t[k].mute) mixed++;
+    *pn = n; *pmixed = mixed;
+    return out;
+}
+
+/* writes the clip's mix (frames f0..f1, from 0) to path; returns 0 (nothing written) without tracks */
+static int export_sound(const Project *P, const Clip *C, int f0, int f1, const char *path) {
+    if (P->sound.n)
+        printf("  sound: %d project track(s) left out (TVPaint does not export them with a clip)\n", P->sound.n);
+    if (!C->sound.n) { printf("  sound: the clip has no sound track, no WAV written\n"); return 0; }
+    long long n; int mixed;
+    double *out = sound_mix(P, C, f0, f1, &n, &mixed);
     /* 48 kHz stereo 24-bit PCM, clipped to [-1, 1] */
     size_t dn = (size_t)n * 6;
     uint8_t *b = xmalloc(44 + dn);

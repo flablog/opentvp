@@ -34,7 +34,7 @@
 
 enum { EV_QUIT = 1, EV_KEY, EV_DOWN, EV_DOUBLE, EV_UP, EV_MOVE, EV_WHEEL, EV_REDRAW };
 enum { K_OTHER, K_SPACE, K_LEFT, K_RIGHT, K_PREV_CLIP, K_NEXT_CLIP, K_HOME, K_END, K_ESC, K_F, K_Q,
-       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN, K_CANVAS, K_GROW_PREV, K_GROW_NEXT, K_PREV_KEY, K_NEXT_KEY, K_LUMA, K_COPY };
+       K_HELP, K_IN, K_OUT, K_RESET, K_INFO, K_HIDDEN, K_CANVAS, K_GROW_PREV, K_GROW_NEXT, K_PREV_KEY, K_NEXT_KEY, K_LUMA, K_COPY, K_MUTE };
 typedef struct { int type, key, x, y; } Event;
 
 #define EVQ 256
@@ -65,6 +65,7 @@ static int char_key(unsigned c) {
     case 'h': case 'H': return K_HIDDEN;
     case 'c': case 'C': return K_CANVAS;
     case 'l': case 'L': return K_LUMA;
+    case 'm': case 'M': return K_MUTE;
     }
     return K_OTHER;
 }
@@ -696,6 +697,8 @@ typedef struct {
     int nloaded;
     uint8_t *keys;            /* n entries: KEY_CHANGE / KEY_NEW flags, found when the file is opened */
     int active, start;        /* part of the sequence, and its position there */
+    float *mix;               /* sound of the clip over its frames (same mix as render --sound), NULL if none */
+    long long mixn;           /* frames of 2 samples at SND_RATE */
 } Section;
 
 /* keyframes: a visible layer shows another drawing than on the previous frame (KEY_CHANGE), or a
@@ -884,6 +887,137 @@ static const uint32_t *frame_at(int i, int *w, int *h) {
 static void set_cur(int i) { lock(); g_cur = i; unlock(); }
 static void set_inout(int a, int b) { lock(); g_in = a; g_out = b; unlock(); }
 
+/* ------------------------------------------------------------------ sound
+ * Each clip's mix is computed when its file is opened (section_sound). An audio thread plays the
+ * timeline from a cursor (clip, sample), at SND_RATE, 16-bit stereo, by blocks of 10 ms. The video
+ * clock drives playback: the main loop sets the cursor on the displayed frame whenever playback
+ * (re)starts or jumps, and stops the sound when playback pauses or waits for frames. Between two
+ * cues the thread follows the timeline by itself: next clip, and back to the in point after the
+ * out point, like advance(). Each cue empties the device, so the first sample is heard at once. */
+
+#define SND_BLOCK 480                   /* 10 ms */
+static int g_snd_on = 1;                /* M */
+static int g_snd_dev;                   /* 1: device open, -1: no device */
+/* guarded by lock(): */
+static int g_a_play, g_a_gen, g_a_k;    /* playing, cue counter (each cue empties the device), clip in ACT */
+static long long g_a_pos;               /* sample in that clip's mix */
+
+/* first sample of timeline frame i (in section s) */
+static long long snd_sample(const Section *s, int i) { return (long long)rint((double)(i - s->start) * SND_RATE / s->fps); }
+
+/* next block, under lock(); returns 0 (block not filled) if a cue came in after `gen` */
+static int snd_fill(int16_t *out, int frames, int gen) {
+    lock();
+    if (g_a_gen != gen) { unlock(); return 0; }
+    for (int j = 0; j < frames; j++) {
+        float v[2] = {0, 0};
+        if (g_a_play && NSEC && g_out >= g_in) {
+            int ko = section_of(g_out);
+            if (g_a_k >= NSEC || g_a_k > ko) { g_a_k = section_of(g_in); g_a_pos = snd_sample(sec(g_a_k), g_in); }
+            Section *s = sec(g_a_k);
+            long long end = g_a_k == ko ? snd_sample(s, g_out + 1) : snd_sample(s, s->start + s->n);
+            if (g_a_pos >= end) {
+                if (g_a_k == ko) { g_a_k = section_of(g_in); g_a_pos = snd_sample(sec(g_a_k), g_in); }
+                else { g_a_k++; g_a_pos = 0; }
+                s = sec(g_a_k);
+            }
+            if (s->mix && g_a_pos >= 0 && g_a_pos < s->mixn) { v[0] = s->mix[2 * g_a_pos]; v[1] = s->mix[2 * g_a_pos + 1]; }
+            g_a_pos++;
+        }
+        for (int c = 0; c < 2; c++) {
+            float x = v[c] < -1.f ? -1.f : (v[c] > 1.f ? 1.f : v[c]);
+            out[2 * j + c] = (int16_t)lrintf(x * 32767.f);
+        }
+    }
+    unlock();
+    return 1;
+}
+
+/* main thread: sound from frame i (just displayed), or silence */
+static void snd_cue(int i) {
+    lock();
+    g_a_k = section_of(i); g_a_pos = snd_sample(sec(g_a_k), i); g_a_play = 1; g_a_gen++;
+    unlock();
+}
+static void snd_stop(void) { lock(); g_a_play = 0; g_a_gen++; unlock(); }
+
+#ifdef _WIN32
+#include <mmsystem.h>
+#define SND_NBUF 4
+THREAD_FN(audio_thread) {
+    (void)arg_;
+    WAVEFORMATEX wf = {WAVE_FORMAT_PCM, 2, SND_RATE, SND_RATE * 4, 4, 16, 0};
+    HANDLE ev = CreateEvent(NULL, FALSE, FALSE, NULL);
+    HWAVEOUT h;
+    if (waveOutOpen(&h, WAVE_MAPPER, &wf, (DWORD_PTR)ev, 0, CALLBACK_EVENT) != MMSYSERR_NOERROR) {
+        g_snd_dev = -1;
+        fprintf(stderr, "  ⚠ no sound output device: playing without sound\n");
+        THREAD_RET;
+    }
+    g_snd_dev = 1;
+    static int16_t buf[SND_NBUF][SND_BLOCK * 2];
+    WAVEHDR hd[SND_NBUF];
+    memset(hd, 0, sizeof hd);
+    for (int i = 0; i < SND_NBUF; i++) {
+        hd[i].lpData = (LPSTR)buf[i]; hd[i].dwBufferLength = sizeof buf[i];
+        waveOutPrepareHeader(h, &hd[i], sizeof hd[i]);
+        hd[i].dwFlags |= WHDR_DONE;          /* free */
+    }
+    int gen = -1;
+    for (;;) {
+        lock(); int g = g_a_gen, play = g_a_play; unlock();
+        if (g != gen) { gen = g; waveOutReset(h); }   /* every queued buffer comes back as done */
+        if (play)
+            for (int i = 0; i < SND_NBUF; i++)
+                if ((hd[i].dwFlags & WHDR_DONE) && snd_fill(buf[i], SND_BLOCK, gen)) {
+                    hd[i].dwFlags &= ~WHDR_DONE;
+                    waveOutWrite(h, &hd[i], sizeof hd[i]);
+                }
+        WaitForSingleObject(ev, play ? 20 : 10);
+    }
+}
+#else
+/* ALSA, loaded at run time like X11: no build-time dependency, no sound without libasound */
+typedef struct snd_pcm_ snd_pcm_t;
+static int (*p_snd_pcm_open)(snd_pcm_t **, const char *, int, int);
+static int (*p_snd_pcm_set_params)(snd_pcm_t *, int, int, unsigned, unsigned, int, unsigned);
+static long (*p_snd_pcm_writei)(snd_pcm_t *, const void *, unsigned long);
+static int (*p_snd_pcm_recover)(snd_pcm_t *, int, int);
+static int (*p_snd_pcm_drop)(snd_pcm_t *);
+static int (*p_snd_pcm_prepare)(snd_pcm_t *);
+THREAD_FN(audio_thread) {
+    (void)arg_;
+    void *lib = dlopen("libasound.so.2", RTLD_NOW);
+    snd_pcm_t *pcm = NULL;
+    if (lib) {
+        p_snd_pcm_open = (__typeof__(p_snd_pcm_open))dlsym(lib, "snd_pcm_open");
+        p_snd_pcm_set_params = (__typeof__(p_snd_pcm_set_params))dlsym(lib, "snd_pcm_set_params");
+        p_snd_pcm_writei = (__typeof__(p_snd_pcm_writei))dlsym(lib, "snd_pcm_writei");
+        p_snd_pcm_recover = (__typeof__(p_snd_pcm_recover))dlsym(lib, "snd_pcm_recover");
+        p_snd_pcm_drop = (__typeof__(p_snd_pcm_drop))dlsym(lib, "snd_pcm_drop");
+        p_snd_pcm_prepare = (__typeof__(p_snd_pcm_prepare))dlsym(lib, "snd_pcm_prepare");
+    }
+    /* stream 0 = playback; format 2 = S16_LE; access 3 = RW interleaved; 40 ms of buffer */
+    if (!lib || !p_snd_pcm_open || !p_snd_pcm_set_params || !p_snd_pcm_writei || !p_snd_pcm_recover ||
+        !p_snd_pcm_drop || !p_snd_pcm_prepare || p_snd_pcm_open(&pcm, "default", 0, 0) < 0 ||
+        p_snd_pcm_set_params(pcm, 2, 3, 2, SND_RATE, 1, 40000) < 0) {
+        g_snd_dev = -1;
+        fprintf(stderr, "  ⚠ no sound output (ALSA, libasound.so.2): playing without sound\n");
+        THREAD_RET;
+    }
+    g_snd_dev = 1;
+    static int16_t buf[SND_BLOCK * 2];
+    int gen = -1;
+    for (;;) {
+        lock(); int g = g_a_gen, play = g_a_play; unlock();
+        if (g != gen) { gen = g; p_snd_pcm_drop(pcm); p_snd_pcm_prepare(pcm); }
+        if (!play || !snd_fill(buf, SND_BLOCK, gen)) { sleep_ms(5); continue; }
+        long r = p_snd_pcm_writei(pcm, buf, SND_BLOCK);       /* blocks while the buffer is full */
+        if (r < 0) p_snd_pcm_recover(pcm, (int)r, 1);
+    }
+}
+#endif
+
 /* ------------------------------------------------------------------ opening and closing files */
 
 /* errors while opening a dropped file come back here instead of ending the program */
@@ -908,6 +1042,7 @@ static void free_section(Section *s) {
     free_frames(s);
     free(s->frames);
     free(s->keys);
+    free(s->mix);
     for (int i = 0; i < s->R.nls; i++) {
         LayerState *L = &s->R.ls[i];
         free(L->img);
@@ -935,6 +1070,25 @@ static const char *base_name(const char *p) {
     const char *b = p + strlen(p);
     while (b > p && b[-1] != '/' && b[-1] != '\\') b--;
     return b;
+}
+
+/* the clip's sound, mixed once when the file is opened (frames f0..f1, as `render --sound`);
+ * project tracks are left out, as in TVPaint's clip export */
+static void section_sound(Section *s) {
+    const Sound *S = &s->C->sound;
+    int any = 0;
+    for (int k = 0; k < S->n; k++) any |= !S->t[k].mute;
+    if (!any || S->mute) return;
+    long long n; int mixed;
+    double *d = sound_mix(&s->F->P, s->C, s->f0, s->f1, &n, &mixed);
+    int silent = 1;
+    for (long long i = 0; i < 2 * n && silent; i++) silent = d[i] == 0;
+    if (!silent) {                       /* all silent (files not found, unreadable): no sound kept */
+        s->mix = xmalloc(sizeof(float) * 2 * (size_t)(n ? n : 1));
+        for (long long i = 0; i < 2 * n; i++) s->mix[i] = (float)d[i];
+        s->mixn = n;
+    }
+    free(d);
 }
 
 /* opens a file and prepares its playable clips (all of them, or only clip `clip`); NULL and a message on error */
@@ -969,6 +1123,7 @@ static File *load_file(const char *path, int clip, int f0, int f1, Section ***ou
         s->fps = F->P.fps > 0 ? F->P.fps : 25;
         s->frames = xcalloc(sizeof(uint32_t *) * s->n);
         section_keys(s);
+        section_sound(s);
         list[n++] = s;
     }
     g_try = NULL;
@@ -1238,6 +1393,7 @@ static const char *HELP[][2] = {
     {"H", "show / hide the hidden clips"},
     {"C", "current clip: whole canvas, outside the camera darkened / camera view"},
     {"L", "luminance: show the pictures in grey levels / in colour"},
+    {"M", "sound on / off (the clips' sound tracks, as TVPaint exports them)"},
     {"F or F11", "fullscreen (or double-click the picture)"},
     {"Ctrl + I", "file information (resolution, frame rate, clips...)"},
     {"Ctrl + C", "copy the current frame to the clipboard (preview resolution)"},
@@ -1340,6 +1496,17 @@ static void draw_info(void) {
         if (C->layers[l].visible && !(b == 0 || b == 1 || b == 2 || b == 7 || b == 9 || b == 10 || b == 11 || b == 12 || b == 15 || b == 17 || b == 25 || b == 26)) unsup++;
     }
     if (unsup) { L[n].colour = COL_WAIT; ROW("Warning", fmt("%d layer(s) with a blending mode played as Color", unsup)); }
+    {
+        const Sound *S = &C->sound;
+        int missing = 0, muted = 0;
+        for (int k = 0; k < S->n; k++) { muted += S->t[k].mute; missing += !S->t[k].mute && !S->t[k].found; }
+        const char *state = !S->n ? "" : (cs->mix ? (g_snd_on ? (g_snd_dev < 0 ? ", no sound output" : ", played") : ", off (M)")
+                                                  : ", silent");
+        if (!S->n) ROW("Sound", "no track");
+        else ROW("Sound", fmt("%d track(s)%s%s%s", S->n, muted ? fmt(", %d muted", muted) : "",
+                              missing ? fmt(", %d file(s) not found", missing) : "", state));
+        if (P->sound.n) { L[n].colour = COL_DIM; ROW("", fmt("%d project track(s) not played (TVPaint does not export them with a clip)", P->sound.n)); }
+    }
     L[n++].cell[0] = "";
     L[n].colour = COL_DIM; L[n++].cell[0] = "Frames counted from 0, as in the project settings (the TVPaint timeline shows +1).";
 #undef ROW
@@ -1702,6 +1869,13 @@ static void grow_selection(int dir) {
 
 /* C: the current clip shows the whole canvas, outside the camera darkened, or the camera view again */
 /* L: grey levels on display only; the frames in memory stay in colour */
+static void toggle_sound(void) {
+    g_snd_on = !g_snd_on;
+    int any = 0; for (int k = 0; k < NSEC; k++) any |= sec(k)->mix != NULL;
+    toast(!g_snd_on ? "Sound off" : (g_snd_dev < 0 ? "Sound on, but there is no sound output"
+                                     : (any ? "Sound on" : "Sound on (no clip has sound)")));
+}
+
 static void toggle_luma(void) {
     g_luma = !g_luma; g_dirty = 1;
     toast(g_luma ? "Luminance: grey levels" : "Colour");
@@ -1815,6 +1989,7 @@ static void key(int k) {
     case K_HIDDEN: toggle_hidden(); break;
     case K_CANVAS: toggle_canvas(); break;
     case K_LUMA: toggle_luma(); break;
+    case K_MUTE: toggle_sound(); break;
     case K_COPY: copy_frame(); break;
     case K_F: toggle_fullscreen(); break;
     case K_HELP: toggle_panel(1); break;
@@ -1979,6 +2154,7 @@ int main(int argc, char **argv) {
     fit_window();
 
     loader_wake();
+    thread_start(audio_thread);
     g_next_t = now();
     char shown_title[1400] = "";
     int last_loaded = -1, reported = 0;
@@ -1992,6 +2168,14 @@ int main(int argc, char **argv) {
         lock(); int nl = loaded_total(), running = g_loader_running; double lt = g_load_time; unlock();
         if (nl != last_loaded) { last_loaded = nl; g_dirty = 1; }
         advance(t);
+        /* sound follows the picture: cue on the displayed frame when playback starts or jumps */
+        {
+            static int was, last;
+            int want = g_snd_on && NFR && g_playing && !g_waiting && !g_dragging;
+            if (want && (!was || (g_cur != last && g_cur != last + 1 && g_cur != g_in))) snd_cue(g_cur);
+            else if (!want && was) snd_stop();
+            was = want; last = g_cur;
+        }
         /* title: file of the current frame, loading progress, and whether playback is waiting for it */
         update_title();
         char tt[1400];
