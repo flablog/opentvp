@@ -901,10 +901,13 @@ static void set_inout(int a, int b) { lock(); g_in = a; g_out = b; unlock(); }
 #define SND_BLOCK 480                   /* 10 ms */
 static int g_snd_on = 1;                /* M, or the speaker button */
 static float g_snd_vol = 1;             /* level 0..1: slider in the bar, saved in play.ini */
+static int g_snd_scrub;                 /* scrub sound: each frame shown outside playback plays its sound (saved) */
 static int g_snd_dev;                   /* 1: device open, -1: no device */
 /* guarded by lock(): */
 static int g_a_play, g_a_gen, g_a_k;    /* playing, cue counter (each cue empties the device), clip in ACT */
 static long long g_a_pos;               /* sample in that clip's mix */
+static long long g_a_from, g_a_end = -1; /* scrub: the one frame being played (g_a_end < 0: normal playback) */
+#define SND_RAMP 96                     /* 2 ms fades at both ends of a scrubbed frame: no clicks */
 
 /* first sample of timeline frame i (in section s) */
 static long long snd_sample(const Section *s, int i) { return (long long)rint((double)(i - s->start) * SND_RATE / s->fps); }
@@ -915,7 +918,17 @@ static int snd_fill(int16_t *out, int frames, int gen) {
     if (g_a_gen != gen) { unlock(); return 0; }
     for (int j = 0; j < frames; j++) {
         float v[2] = {0, 0};
-        if (g_a_play && NSEC && g_out >= g_in) {
+        if (g_a_play && g_a_end >= 0 && g_a_k < NSEC) {
+            Section *s = sec(g_a_k);
+            if (g_a_pos >= g_a_end) g_a_play = 0;
+            else {
+                long long a = g_a_pos - g_a_from, b = g_a_end - g_a_pos;
+                float r = a < SND_RAMP ? (float)a / SND_RAMP : 1.f;
+                if (b < SND_RAMP && (float)b / SND_RAMP < r) r = (float)b / SND_RAMP;
+                if (s->mix && g_a_pos >= 0 && g_a_pos < s->mixn) { v[0] = s->mix[2 * g_a_pos] * g_snd_vol * r; v[1] = s->mix[2 * g_a_pos + 1] * g_snd_vol * r; }
+                g_a_pos++;
+            }
+        } else if (g_a_play && NSEC && g_out >= g_in) {
             int ko = section_of(g_out);
             if (g_a_k >= NSEC || g_a_k > ko) { g_a_k = section_of(g_in); g_a_pos = snd_sample(sec(g_a_k), g_in); }
             Section *s = sec(g_a_k);
@@ -940,7 +953,15 @@ static int snd_fill(int16_t *out, int frames, int gen) {
 /* main thread: sound from frame i (just displayed), or silence */
 static void snd_cue(int i) {
     lock();
-    g_a_k = section_of(i); g_a_pos = snd_sample(sec(g_a_k), i); g_a_play = 1; g_a_gen++;
+    g_a_k = section_of(i); g_a_pos = snd_sample(sec(g_a_k), i); g_a_end = -1; g_a_play = 1; g_a_gen++;
+    unlock();
+}
+/* main thread: scrub, the sound of frame i only (one frame long) */
+static void snd_scrub(int i) {
+    lock();
+    g_a_k = section_of(i);
+    Section *s = sec(g_a_k);
+    g_a_from = g_a_pos = snd_sample(s, i); g_a_end = snd_sample(s, i + 1); g_a_play = 1; g_a_gen++;
     unlock();
 }
 static void snd_stop(void) { lock(); g_a_play = 0; g_a_gen++; unlock(); }
@@ -1207,7 +1228,11 @@ static double load_saved_scale(void) {
     FILE *f = fopen_u8(p, "rb");
     double v = 0;
     double vol = -1;
-    if (f) { char line[200]; while (fgets(line, sizeof line, f)) { sscanf(line, "scale=%lf", &v); sscanf(line, "volume=%lf", &vol); } fclose(f); }
+    if (f) {
+        char line[200];
+        while (fgets(line, sizeof line, f)) { sscanf(line, "scale=%lf", &v); sscanf(line, "volume=%lf", &vol); sscanf(line, "scrub=%d", &g_snd_scrub); }
+        fclose(f);
+    }
     if (vol >= 0 && vol <= 1) g_snd_vol = (float)vol;
     return v > 0 && v <= 4 ? v : 0.5;
 }
@@ -1217,7 +1242,7 @@ static void save_scale(void) {
     settings_file(d, sizeof d, 1); settings_file(p, sizeof p, 0);
     mkdir_p(d);
     FILE *f = fopen_u8(p, "wb");
-    if (f) { fprintf(f, "# opentvp-play settings\nscale=%g\nvolume=%g\n", g_scale, g_snd_vol); fclose(f); }
+    if (f) { fprintf(f, "# opentvp-play settings\nscale=%g\nvolume=%g\nscrub=%d\n", g_scale, g_snd_vol, g_snd_scrub); fclose(f); }
 }
 
 /* ------------------------------------------------------------------ drawing */
@@ -1409,8 +1434,9 @@ static const char *HELP[][2] = {
     {"", 0},
     {"Drop .tvpp files on the window: top half replaces the timeline,", 0},
     {"  bottom half appends them to it.", 0},
-    {"Bottom left: preview resolution (half or full), then the sound button: volume", 0},
-    {"  and mute (the mouse wheel over it sets the volume). Both are remembered.", 0},
+    {"Bottom left: preview resolution (half or full), then the sound button: volume,", 0},
+    {"  scrub sound (each frame shown while paused or scrubbing plays its own sound)", 0},
+    {"  and mute; the mouse wheel over it sets the volume. All are remembered.", 0},
     {"Timeline: one section per clip (click a clip name to play only that clip),", 0},
     {"  light grey = frames in memory, orange brackets = in / out points,", 0},
     {"  purple names = clips hidden in TVPaint, yellow dots (Shift) = keyframes.", 0},
@@ -1587,16 +1613,16 @@ static int track_cy(void) { return bar_top() + 42 * g_ui; }
 static void res_button(int *x, int *w) { *x = 46 * g_ui; *w = text_width("100%") + 20 * g_ui; }
 /* sound button (speaker and arrow), after the resolution button */
 static void snd_button(int *x, int *w) { int rx, rw; res_button(&rx, &rw); *x = rx + rw + 8 * g_ui; *w = 40 * g_ui; }
-/* sound panel above it: "Volume", a vertical slider from sy0 (100 %) to sy1 (0 %), then the "Mute (M)" row at my */
-static void vmenu_rect(int *x, int *y, int *w, int *h, int *sy0, int *sy1, int *my) {
+/* sound panel above it: "Volume", a vertical slider from sy0 (100 %) to sy1 (0 %), then the
+ * "Scrub sound" row at sr and the "Mute (M)" row at my (both mh high) */
+static void vmenu_rect(int *x, int *y, int *w, int *h, int *sy0, int *sy1, int *sr, int *my) {
     int u = g_ui, bx, bw; snd_button(&bx, &bw);
     int th = font_h() + 12 * u, sh = 110 * u, mh = font_h() + 14 * u;
-    *w = text_width("Mute (M)") + 48 * u;
-    if (*w < text_width("Volume") + 24 * u) *w = text_width("Volume") + 24 * u;
-    *h = th + sh + mh;
+    *w = text_width("Scrub sound") + 48 * u;
+    *h = th + sh + 2 * mh;
     *x = bx + bw / 2 - *w / 2; if (*x < 4 * u) *x = 4 * u;
     *y = bar_top() - *h - 4 * u;
-    *sy0 = *y + th + 8 * u; *sy1 = *y + th + sh - 8 * u; *my = *y + th + sh;
+    *sy0 = *y + th + 8 * u; *sy1 = *y + th + sh - 8 * u; *sr = *y + th + sh; *my = *sr + mh;
 }
 static void track_x(int *x0, int *x1) {
     int bx, bw; snd_button(&bx, &bw);
@@ -1719,7 +1745,7 @@ static void draw_menu(void) {
 }
 
 static void draw_vmenu(void) {
-    int u = g_ui, x, y, w, h, sy0, sy1, my; vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &my);
+    int u = g_ui, x, y, w, h, sy0, sy1, sr, my; vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &sr, &my);
     int off = !g_snd_on || g_snd_vol <= 0, cx = x + w / 2;
     fill(x, y, w, h, COL_MENU);
     frame_rect(x, y, w, h, u, COL_SEP);
@@ -1728,8 +1754,14 @@ static void draw_vmenu(void) {
     fill(cx - u, sy0, 2 * u, sy1 - sy0, COL_TRACK);
     fill(cx - u, ky, 2 * u, sy1 - ky, off ? COL_DIM : COL_PLAYED);
     fill(cx - 6 * u, ky - 2 * u, 12 * u, 4 * u, off ? COL_DIM : COL_ICON);
+    int mh = my - sr;
+    fill(x + u, sr, w - 2 * u, u, COL_SEP);
+    int qy = sr + mh / 2;                       /* scrub: a checkbox */
+    frame_rect(x + 10 * u, qy - 5 * u, 10 * u, 10 * u, u, g_snd_scrub ? COL_ICON : COL_DIM);
+    if (g_snd_scrub) fill(x + 12 * u, qy - 3 * u, 6 * u, 6 * u, COL_PLAYED);
+    text(x + 34 * u, qy - font_h() / 2, "Scrub sound", g_snd_scrub ? COL_ICON : COL_DIM, 0);
     fill(x + u, my, w - 2 * u, u, COL_SEP);
-    int ry = my + (h - (my - y)) / 2;
+    int ry = my + mh / 2;
     draw_speaker(x + 8 * u, ry, !g_snd_on ? COL_ICON : COL_DIM);
     text(x + 34 * u, ry - font_h() / 2, "Mute (M)", !g_snd_on ? COL_ICON : COL_DIM, 0);
 }
@@ -1926,6 +1958,13 @@ static void grow_selection(int dir) {
 
 /* C: the current clip shows the whole canvas, outside the camera darkened, or the camera view again */
 /* L: grey levels on display only; the frames in memory stay in colour */
+static void toggle_scrub(void) {
+    g_snd_scrub = !g_snd_scrub;
+    save_scale();
+    if (!g_vmenu) toast(g_snd_scrub ? "Scrub sound on" : "Scrub sound off");
+    g_dirty = 1;
+}
+
 /* level 0..1, by steps of 1 %; setting a level turns the sound on */
 static void set_volume(float v, int save) {
     v = v < 0 ? 0 : (v > 1 ? 1 : v);
@@ -2078,7 +2117,7 @@ static void handle(const Event *e) {
     case EV_REDRAW: g_dirty = 1; break;
     case EV_KEY: key(e->key); break;
     case EV_WHEEL: {        /* over the sound button or its panel: level; elsewhere: frames */
-        int bx, bw, x, y, w, h, sy0, sy1, my; snd_button(&bx, &bw); vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &my);
+        int bx, bw, x, y, w, h, sy0, sy1, sr, my; snd_button(&bx, &bw); vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &sr, &my);
         if ((in_bar && e->x >= bx && e->x < bx + bw) || (g_vmenu && e->x >= x && e->x < x + w && e->y >= y && e->y < y + h))
             set_volume(g_snd_vol - 0.05f * e->key, 1);
         else if (NFR) go(g_cur + e->key);
@@ -2095,9 +2134,10 @@ static void handle(const Event *e) {
             break;
         }
         if (g_vmenu) {                           /* sound panel: slider, mute row; a click elsewhere closes it */
-            int x, y, w, h, sy0, sy1, my, bx, bw; vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &my); snd_button(&bx, &bw);
+            int x, y, w, h, sy0, sy1, sr, my, bx, bw; vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &sr, &my); snd_button(&bx, &bw);
             int inside = e->x >= x && e->x < x + w && e->y >= y && e->y < y + h;
             if (inside && e->y >= my) toggle_sound();
+            else if (inside && e->y >= sr) toggle_scrub();
             else if (inside && e->y >= sy0 - 8 * u && e->y <= sy1 + 8 * u) { g_vol_drag = 1; set_volume((float)(sy1 - e->y) / (sy1 - sy0), 0); }
             else if (!inside) { g_vmenu = 0; g_dirty = 1; if (in_bar && e->x >= bx && e->x < bx + bw) break; }
             if (inside) break;
@@ -2128,7 +2168,7 @@ static void handle(const Event *e) {
         lx = e->x; ly = e->y;
         g_last_move = now();
         if (!g_bar_on) { g_bar_on = 1; plat_cursor(1); g_dirty = 1; }
-        if (g_vol_drag) { int x, y, w, h, sy0, sy1, my; vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &my); set_volume((float)(sy1 - e->y) / (sy1 - sy0), 0); }
+        if (g_vol_drag) { int x, y, w, h, sy0, sy1, sr, my; vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &sr, &my); set_volume((float)(sy1 - e->y) / (sy1 - sy0), 0); }
         else if (g_dragging) { update_shift(); seek_x(e->x); }
         else if (g_pic_drag) { update_shift(); picture_drag(e->x); }
         else if (g_ruler) {
@@ -2253,13 +2293,17 @@ int main(int argc, char **argv) {
         lock(); int nl = loaded_total(), running = g_loader_running; double lt = g_load_time; unlock();
         if (nl != last_loaded) { last_loaded = nl; g_dirty = 1; }
         advance(t);
-        /* sound follows the picture: cue on the displayed frame when playback starts or jumps */
+        /* sound follows the picture: cue on the displayed frame when playback starts or jumps;
+           outside playback, with scrub sound on, each new frame plays its own sound */
         {
-            static int was, last;
+            static int was, last = -1;
             int want = g_snd_on && NFR && g_playing && !g_waiting && !g_dragging;
-            if (want && (!was || (g_cur != last && g_cur != last + 1 && g_cur != g_in))) snd_cue(g_cur);
-            else if (!want && was) snd_stop();
-            was = want; last = g_cur;
+            if (want) { if (!was || (g_cur != last && g_cur != last + 1 && g_cur != g_in)) snd_cue(g_cur); }
+            else {
+                if (was) snd_stop();
+                if (g_snd_scrub && g_snd_on && NFR && g_cur != last && last >= 0 && !g_waiting) snd_scrub(g_cur);
+            }
+            was = want; last = NFR ? g_cur : -1;
         }
         /* title: file of the current frame, loading progress, and whether playback is waiting for it */
         update_title();

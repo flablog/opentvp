@@ -80,7 +80,7 @@ Frames are rendered in the background and kept in memory: playback starts with t
 | C | current clip: whole canvas with the camera frame shown / camera view |
 | L | luminance: pictures shown in grey levels (Rec. 709 luma) / in colour; display only, nothing is rendered again |
 | M | sound on / off |
-| sound button in the bar (speaker) | opens the sound panel: volume slider and **Mute (M)**; the mouse wheel over the button or the panel sets the volume (5 % steps); the volume is remembered in `play.ini` |
+| sound button in the bar (speaker) | opens the sound panel: volume slider, **Scrub sound** and **Mute (M)**; the mouse wheel over the button or the panel sets the volume (5 % steps); the volume and scrub sound are remembered in `play.ini` |
 | Ctrl + I | file information |
 | Ctrl + C | copy the current frame to the clipboard, as shown: preview resolution, camera or canvas view, grey levels with L (Windows: image and PNG, still there after quitting; Linux: PNG, available while the player is open unless a clipboard manager keeps it) |
 | F, F11, fullscreen button, double-click on the picture | fullscreen on / off (the picture is resized to fit) |
@@ -90,7 +90,7 @@ Frames are rendered in the background and kept in memory: playback starts with t
 
 Keys are read as typed characters, so `[`, `]` and `\` work on any keyboard layout (AltGr on AZERTY). In fullscreen, the bar and the cursor hide after 2 seconds of playback without moving the mouse. If playback then has to wait for frames that are not loaded yet, the bar comes back on its own (red play / pause button, loading shown on the timeline) and hides again 2 seconds after playback is smooth again.
 
-**Sound.** Each clip plays its own sound tracks, mixed as `opentvp render --sound` does (and as TVPaint exports a clip: project tracks are left out). The mix is prepared when the file is opened; a sound file that cannot be found is reported in the terminal and Ctrl+I, and the clip plays without it. Sound follows normal playback, including the in / out loop and the passage from one clip to the next; it stops while playback is paused, scrubbed (drag, Alt + drag) or waiting for frames, and starts again on the displayed frame. **M** turns it off and on. Windows: default output device; Linux: ALSA (`libasound.so.2`, loaded at run time; without it the player runs silently).
+**Sound.** Each clip plays its own sound tracks, mixed as `opentvp render --sound` does (and as TVPaint exports a clip: project tracks are left out). The mix is prepared when the file is opened; a sound file that cannot be found is reported in the terminal and Ctrl+I, and the clip plays without it. Sound follows normal playback, including the in / out loop and the passage from one clip to the next; it stops while playback is paused, scrubbed (drag, Alt + drag) or waiting for frames, and starts again on the displayed frame. With **Scrub sound** (in the sound panel), every frame shown outside playback (dragging on the timeline or the picture, Alt + drag, arrow keys, wheel, keyframe jumps) plays its own sound, one frame long: the sound of a frame can be checked while stepping through the animation. **M** turns it off and on. Windows: default output device; Linux: ALSA (`libasound.so.2`, loaded at run time; without it the player runs silently).
 
 In memory, a 1920×1080 camera takes ≈ 2 MB per frame at half resolution and ≈ 8 MB at full resolution; if memory runs out, the player keeps the frames already loaded and says so.
 
