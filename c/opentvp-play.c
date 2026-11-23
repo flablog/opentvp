@@ -156,7 +156,10 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM wp, LPARAM lp) {
     case WM_LBUTTONDBLCLK: SetCapture(h); ev_push(EV_DOUBLE, 0, x, y); return 0;
     case WM_LBUTTONUP: ReleaseCapture(); ev_push(EV_UP, 0, x, y); return 0;
     case WM_MOUSEMOVE: ev_push(EV_MOVE, 0, x, y); return 0;
-    case WM_MOUSEWHEEL: ev_push(EV_WHEEL, (short)HIWORD(wp) > 0 ? -1 : 1, 0, 0); return 0;
+    case WM_MOUSEWHEEL: {   /* position in screen coordinates */
+        POINT pt = {(short)LOWORD(lp), (short)HIWORD(lp)}; ScreenToClient(h, &pt);
+        ev_push(EV_WHEEL, (short)HIWORD(wp) > 0 ? -1 : 1, pt.x, pt.y); return 0;
+    }
     }
     return DefWindowProcW(h, m, wp, lp);
 }
@@ -621,7 +624,7 @@ static void plat_pump(void) {
                 ev_push(dbl ? EV_DOUBLE : EV_DOWN, 0, e.xbutton.x, e.xbutton.y);
                 g_last_click = dbl ? 0 : e.xbutton.time; g_last_cx = e.xbutton.x; g_last_cy = e.xbutton.y;
             } else if (e.xbutton.button == 4 || e.xbutton.button == 5) {
-                ev_push(EV_WHEEL, e.xbutton.button == 4 ? -1 : 1, 0, 0);
+                ev_push(EV_WHEEL, e.xbutton.button == 4 ? -1 : 1, e.xbutton.x, e.xbutton.y);
             }
             break;
         case ButtonRelease:
@@ -896,7 +899,8 @@ static void set_inout(int a, int b) { lock(); g_in = a; g_out = b; unlock(); }
  * out point, like advance(). Each cue empties the device, so the first sample is heard at once. */
 
 #define SND_BLOCK 480                   /* 10 ms */
-static int g_snd_on = 1;                /* M */
+static int g_snd_on = 1;                /* M, or the speaker button */
+static float g_snd_vol = 1;             /* level 0..1: slider in the bar, saved in play.ini */
 static int g_snd_dev;                   /* 1: device open, -1: no device */
 /* guarded by lock(): */
 static int g_a_play, g_a_gen, g_a_k;    /* playing, cue counter (each cue empties the device), clip in ACT */
@@ -921,7 +925,7 @@ static int snd_fill(int16_t *out, int frames, int gen) {
                 else { g_a_k++; g_a_pos = 0; }
                 s = sec(g_a_k);
             }
-            if (s->mix && g_a_pos >= 0 && g_a_pos < s->mixn) { v[0] = s->mix[2 * g_a_pos]; v[1] = s->mix[2 * g_a_pos + 1]; }
+            if (s->mix && g_a_pos >= 0 && g_a_pos < s->mixn) { v[0] = s->mix[2 * g_a_pos] * g_snd_vol; v[1] = s->mix[2 * g_a_pos + 1] * g_snd_vol; }
             g_a_pos++;
         }
         for (int c = 0; c < 2; c++) {
@@ -1202,7 +1206,9 @@ static double load_saved_scale(void) {
     char p[2100]; settings_file(p, sizeof p, 0);
     FILE *f = fopen_u8(p, "rb");
     double v = 0;
-    if (f) { char line[200]; while (fgets(line, sizeof line, f)) sscanf(line, "scale=%lf", &v); fclose(f); }
+    double vol = -1;
+    if (f) { char line[200]; while (fgets(line, sizeof line, f)) { sscanf(line, "scale=%lf", &v); sscanf(line, "volume=%lf", &vol); } fclose(f); }
+    if (vol >= 0 && vol <= 1) g_snd_vol = (float)vol;
     return v > 0 && v <= 4 ? v : 0.5;
 }
 
@@ -1211,7 +1217,7 @@ static void save_scale(void) {
     settings_file(d, sizeof d, 1); settings_file(p, sizeof p, 0);
     mkdir_p(d);
     FILE *f = fopen_u8(p, "wb");
-    if (f) { fprintf(f, "# opentvp-play settings\nscale=%g\n", g_scale); fclose(f); }
+    if (f) { fprintf(f, "# opentvp-play settings\nscale=%g\nvolume=%g\n", g_scale, g_snd_vol); fclose(f); }
 }
 
 /* ------------------------------------------------------------------ drawing */
@@ -1403,7 +1409,8 @@ static const char *HELP[][2] = {
     {"", 0},
     {"Drop .tvpp files on the window: top half replaces the timeline,", 0},
     {"  bottom half appends them to it.", 0},
-    {"Bottom left: preview resolution (half or full), remembered for next time.", 0},
+    {"Bottom left: preview resolution (half or full), then sound on / off and its", 0},
+    {"  level (click or drag the slider, or the mouse wheel over it); both remembered.", 0},
     {"Timeline: one section per clip (click a clip name to play only that clip),", 0},
     {"  light grey = frames in memory, orange brackets = in / out points,", 0},
     {"  purple names = clips hidden in TVPaint, yellow dots (Shift) = keyframes.", 0},
@@ -1517,6 +1524,7 @@ static void draw_info(void) {
 
 static int g_playing = 1, g_waiting, g_dragging, g_resume, g_bar_on = 1, g_dirty = 1;
 static int g_shift;                     /* Shift held: keyframes shown, the playhead snaps to them */
+static int g_vol_drag;                  /* dragging the volume slider */
 static int g_pic_drag, g_pic_x, g_pic_cur, g_pic_moved;   /* drag on the picture: start x and frame */
 static int g_ruler, g_ruler_x, g_ruler_y, g_ruler_cur;    /* Alt + drag on the picture: frame ruler at the click */
 #define RULER_STEP (12 * g_ui)                             /* pixels per frame on the ruler */
@@ -1576,9 +1584,14 @@ static int counter_w(void) {
 static int bar_top(void) { return g_wh - BAR_H; }
 static int track_cy(void) { return bar_top() + 42 * g_ui; }
 static void res_button(int *x, int *w) { *x = 46 * g_ui; *w = text_width("100%") + 20 * g_ui; }
-static void track_x(int *x0, int *x1) {
+/* sound: speaker button (on / off), then the volume slider (sx, sw) */
+static void snd_area(int *x, int *w, int *sx, int *sw) {
     int rx, rw; res_button(&rx, &rw);
-    *x0 = rx + rw + 14 * g_ui; *x1 = g_ww - 56 * g_ui - counter_w();
+    *x = rx + rw + 10 * g_ui; *sx = *x + 26 * g_ui; *sw = 60 * g_ui; *w = *sx + *sw - *x;
+}
+static void track_x(int *x0, int *x1) {
+    int ax, aw, sx, sw; snd_area(&ax, &aw, &sx, &sw);
+    *x0 = ax + aw + 14 * g_ui; *x1 = g_ww - 56 * g_ui - counter_w();
     if (*x1 < *x0 + 10) *x1 = *x0 + 10;
 }
 static int pos_x(int i) { int x0, x1; track_x(&x0, &x1); return x0 + (int)((double)(x1 - x0) * i / NFR); }
@@ -1606,6 +1619,22 @@ static void draw_bar(void) {
     fill(rx, cy - 11 * u, rw, 22 * u, g_menu ? 0x3a3a3a : COL_MENU);
     text(rx + 6 * u, cy - font_h() / 2, pct, COL_ICON, 0);
     for (int i = 0; i < 4 * u; i++) fill(rx + rw - 12 * u + i, cy - 2 * u + i, 8 * u - 2 * i, 1, COL_DIM);
+    /* speaker (crossed out when off, dim without an output device) and volume slider */
+    {
+        int ax, aw, sx, sw; snd_area(&ax, &aw, &sx, &sw);
+        int off = !g_snd_on || g_snd_vol <= 0;
+        uint32_t ic = g_snd_dev < 0 ? COL_DIM : COL_ICON;
+        fill(ax + 2 * u, cy - 3 * u, 4 * u, 6 * u, ic);
+        for (int i = 0; i < 6 * u; i++) fill(ax + 6 * u + i, cy - 3 * u - i, 1, 6 * u + 2 * i, ic);
+        if (off)
+            for (int i = 0; i < 8 * u; i++) { fill(ax + 14 * u + i, cy - 4 * u + i, 2 * u, u, COL_WAIT); fill(ax + 14 * u + i, cy + 3 * u - i, 2 * u, u, COL_WAIT); }
+        else
+            for (int k = 1; k <= 2; k++) if (g_snd_vol > (k - 1) * 0.5f) fill(ax + 13 * u + 4 * (k - 1) * u, cy - (2 + 2 * k) * u, 2 * u, (4 + 4 * k) * u, ic);
+        int kx = sx + (int)(g_snd_vol * sw + 0.5f);
+        fill(sx, cy - u, sw, 2 * u, COL_TRACK);
+        fill(sx, cy - u, kx - sx, 2 * u, off ? COL_DIM : COL_PLAYED);
+        fill(kx - 2 * u, cy - 6 * u, 4 * u, 12 * u, off ? COL_DIM : COL_ICON);
+    }
 
     int x0, x1; track_x(&x0, &x1);
     int th = 8 * u, ty = cy - th / 2, cur_sec = section_of(g_cur);
@@ -1869,6 +1898,17 @@ static void grow_selection(int dir) {
 
 /* C: the current clip shows the whole canvas, outside the camera darkened, or the camera view again */
 /* L: grey levels on display only; the frames in memory stay in colour */
+/* level 0..1, by steps of 1 %; setting a level turns the sound on */
+static void set_volume(float v, int save) {
+    v = v < 0 ? 0 : (v > 1 ? 1 : v);
+    g_snd_vol = floorf(v * 100 + 0.5f) / 100;
+    g_snd_on = 1;
+    char m[64]; snprintf(m, sizeof m, "Volume %d %%", (int)(g_snd_vol * 100 + 0.5f));
+    toast(m);
+    if (save) save_scale();
+    g_dirty = 1;
+}
+
 static void toggle_sound(void) {
     g_snd_on = !g_snd_on;
     int any = 0; for (int k = 0; k < NSEC; k++) any |= sec(k)->mix != NULL;
@@ -2009,7 +2049,12 @@ static void handle(const Event *e) {
     case EV_QUIT: exit(0);
     case EV_REDRAW: g_dirty = 1; break;
     case EV_KEY: key(e->key); break;
-    case EV_WHEEL: if (NFR) go(g_cur + e->key); break;
+    case EV_WHEEL: {        /* over the sound controls: level; elsewhere: frames */
+        int ax, aw, sx, sw; snd_area(&ax, &aw, &sx, &sw);
+        if (in_bar && e->x >= ax && e->x < ax + aw + 4 * u) set_volume(g_snd_vol - 0.05f * e->key, 1);
+        else if (NFR) go(g_cur + e->key);
+        break;
+    }
     case EV_DOUBLE:
         if (!in_bar && !g_menu && !plat_alt()) { toggle_fullscreen(); break; }
         /* fall through: a quick second click on the controls is a normal click */
@@ -2026,9 +2071,11 @@ static void handle(const Event *e) {
             else { g_pic_drag = 1; g_pic_moved = 0; g_pic_x = e->x; g_pic_cur = g_cur; }
             break;
         }
-        int x0, x1, rx, rw; track_x(&x0, &x1); res_button(&rx, &rw);
+        int x0, x1, rx, rw, ax, aw, sx, sw; track_x(&x0, &x1); res_button(&rx, &rw); snd_area(&ax, &aw, &sx, &sw);
         if (e->x < 44 * u) toggle_play();
         else if (e->x >= rx && e->x < rx + rw) { g_menu = 1; g_dirty = 1; }
+        else if (e->x >= ax && e->x < sx - 3 * u) toggle_sound();
+        else if (e->x >= sx - 3 * u && e->x <= sx + sw + 4 * u) { g_vol_drag = 1; set_volume((float)(e->x - sx) / sw, 0); }
         else if (e->x >= g_ww - 44 * u) toggle_fullscreen();
         else if (e->x >= x0 && e->x < x1 && e->y < track_cy() - 12 * u) {
             /* clip name row: play only that clip */
@@ -2045,7 +2092,8 @@ static void handle(const Event *e) {
         lx = e->x; ly = e->y;
         g_last_move = now();
         if (!g_bar_on) { g_bar_on = 1; plat_cursor(1); g_dirty = 1; }
-        if (g_dragging) { update_shift(); seek_x(e->x); }
+        if (g_vol_drag) { int ax, aw, sx, sw; snd_area(&ax, &aw, &sx, &sw); set_volume((float)(e->x - sx) / sw, 0); }
+        else if (g_dragging) { update_shift(); seek_x(e->x); }
         else if (g_pic_drag) { update_shift(); picture_drag(e->x); }
         else if (g_ruler) {
             update_shift();
@@ -2055,6 +2103,7 @@ static void handle(const Event *e) {
         break;
     }
     case EV_UP:
+        if (g_vol_drag) { g_vol_drag = 0; save_scale(); }
         g_pic_drag = 0;
         if (g_ruler) { g_ruler = 0; g_dirty = 1; }
         if (g_dragging) { g_dragging = 0; g_playing = g_resume; g_next_t = now() + 1.0 / sec(section_of(g_cur))->fps; g_dirty = 1; }
