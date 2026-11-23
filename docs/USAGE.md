@@ -79,8 +79,8 @@ Frames are rendered in the background and kept in memory: playback starts with t
 | H | show / hide the clips hidden in TVPaint |
 | C | current clip: whole canvas with the camera frame shown / camera view |
 | L | luminance: pictures shown in grey levels (Rec. 709 luma) / in colour; display only, nothing is rendered again |
-| M, speaker button in the bar | sound on / off |
-| volume slider in the bar | sound level: click or drag, or the mouse wheel over it (5 % steps); remembered in `play.ini` |
+| M | sound on / off |
+| sound button in the bar (speaker) | opens the sound panel: volume slider and **Mute (M)**; the mouse wheel over the button or the panel sets the volume (5 % steps); the volume is remembered in `play.ini` |
 | Ctrl + I | file information |
 | Ctrl + C | copy the current frame to the clipboard, as shown: preview resolution, camera or canvas view, grey levels with L (Windows: image and PNG, still there after quitting; Linux: PNG, available while the player is open unless a clipboard manager keeps it) |
 | F, F11, fullscreen button, double-click on the picture | fullscreen on / off (the picture is resized to fit) |

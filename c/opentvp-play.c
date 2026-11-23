@@ -1409,8 +1409,8 @@ static const char *HELP[][2] = {
     {"", 0},
     {"Drop .tvpp files on the window: top half replaces the timeline,", 0},
     {"  bottom half appends them to it.", 0},
-    {"Bottom left: preview resolution (half or full), then sound on / off and its", 0},
-    {"  level (click or drag the slider, or the mouse wheel over it); both remembered.", 0},
+    {"Bottom left: preview resolution (half or full), then the sound button: volume", 0},
+    {"  and mute (the mouse wheel over it sets the volume). Both are remembered.", 0},
     {"Timeline: one section per clip (click a clip name to play only that clip),", 0},
     {"  light grey = frames in memory, orange brackets = in / out points,", 0},
     {"  purple names = clips hidden in TVPaint, yellow dots (Shift) = keyframes.", 0},
@@ -1530,6 +1530,7 @@ static int g_ruler, g_ruler_x, g_ruler_y, g_ruler_cur;    /* Alt + drag on the p
 #define RULER_STEP (12 * g_ui)                             /* pixels per frame on the ruler */
 static int g_panel;                     /* 0 none, 1 help (F1), 2 information (Ctrl+I) */
 static int g_menu;                      /* resolution menu open */
+static int g_vmenu;                     /* sound panel open (volume slider, mute) */
 static double g_next_t, g_last_move;
 static char g_toast[300];               /* short message above the bar, e.g. after H */
 static double g_toast_until;
@@ -1539,7 +1540,7 @@ static char g_title[1200];
  * until 2 seconds after it plays smoothly again; the cursor stays hidden */
 static double g_last_wait = -1e9;
 static int bar_visible(void) {
-    return NFR && (!g_fullscreen || g_bar_on || g_panel || g_menu || g_shift || now() - g_last_wait < 2.0);
+    return NFR && (!g_fullscreen || g_bar_on || g_panel || g_menu || g_vmenu || g_shift || now() - g_last_wait < 2.0);
 }
 
 static void toast(const char *m) { snprintf(g_toast, sizeof g_toast, "%s", m); g_toast_until = now() + 3.0; g_dirty = 1; }
@@ -1584,14 +1585,22 @@ static int counter_w(void) {
 static int bar_top(void) { return g_wh - BAR_H; }
 static int track_cy(void) { return bar_top() + 42 * g_ui; }
 static void res_button(int *x, int *w) { *x = 46 * g_ui; *w = text_width("100%") + 20 * g_ui; }
-/* sound: speaker button (on / off), then the volume slider (sx, sw) */
-static void snd_area(int *x, int *w, int *sx, int *sw) {
-    int rx, rw; res_button(&rx, &rw);
-    *x = rx + rw + 10 * g_ui; *sx = *x + 26 * g_ui; *sw = 60 * g_ui; *w = *sx + *sw - *x;
+/* sound button (speaker and arrow), after the resolution button */
+static void snd_button(int *x, int *w) { int rx, rw; res_button(&rx, &rw); *x = rx + rw + 8 * g_ui; *w = 40 * g_ui; }
+/* sound panel above it: "Volume", a vertical slider from sy0 (100 %) to sy1 (0 %), then the "Mute (M)" row at my */
+static void vmenu_rect(int *x, int *y, int *w, int *h, int *sy0, int *sy1, int *my) {
+    int u = g_ui, bx, bw; snd_button(&bx, &bw);
+    int th = font_h() + 12 * u, sh = 110 * u, mh = font_h() + 14 * u;
+    *w = text_width("Mute (M)") + 48 * u;
+    if (*w < text_width("Volume") + 24 * u) *w = text_width("Volume") + 24 * u;
+    *h = th + sh + mh;
+    *x = bx + bw / 2 - *w / 2; if (*x < 4 * u) *x = 4 * u;
+    *y = bar_top() - *h - 4 * u;
+    *sy0 = *y + th + 8 * u; *sy1 = *y + th + sh - 8 * u; *my = *y + th + sh;
 }
 static void track_x(int *x0, int *x1) {
-    int ax, aw, sx, sw; snd_area(&ax, &aw, &sx, &sw);
-    *x0 = ax + aw + 14 * g_ui; *x1 = g_ww - 56 * g_ui - counter_w();
+    int bx, bw; snd_button(&bx, &bw);
+    *x0 = bx + bw + 14 * g_ui; *x1 = g_ww - 56 * g_ui - counter_w();
     if (*x1 < *x0 + 10) *x1 = *x0 + 10;
 }
 static int pos_x(int i) { int x0, x1; track_x(&x0, &x1); return x0 + (int)((double)(x1 - x0) * i / NFR); }
@@ -1604,6 +1613,17 @@ static void menu_rect(int *x, int *y, int *w, int *ih) {
     *ih = font_h() + 12 * g_ui;
     *w = text_width(MENU_TEXT[0]) + 40 * g_ui;
     *x = rx; *y = bar_top() - 2 * *ih - 4 * g_ui;
+}
+
+/* speaker icon from x, centred on cy: waves for the level, a red cross when the sound is off */
+static void draw_speaker(int x, int cy, uint32_t c) {
+    int u = g_ui;
+    fill(x, cy - 3 * u, 4 * u, 6 * u, c);
+    for (int i = 0; i < 6 * u; i++) fill(x + 4 * u + i, cy - 3 * u - i, 1, 6 * u + 2 * i, c);
+    if (!g_snd_on || g_snd_vol <= 0)
+        for (int i = 0; i < 7 * u; i++) { fill(x + 12 * u + i, cy - 4 * u + i, 2 * u, u, COL_WAIT); fill(x + 12 * u + i, cy + 3 * u - i, 2 * u, u, COL_WAIT); }
+    else
+        for (int k = 0; k < 2; k++) if (g_snd_vol > k * 0.5f) fill(x + 12 * u + 4 * k * u, cy - (4 + 2 * k) * u, 2 * u, (8 + 4 * k) * u, c);
 }
 
 static void draw_bar(void) {
@@ -1619,21 +1639,12 @@ static void draw_bar(void) {
     fill(rx, cy - 11 * u, rw, 22 * u, g_menu ? 0x3a3a3a : COL_MENU);
     text(rx + 6 * u, cy - font_h() / 2, pct, COL_ICON, 0);
     for (int i = 0; i < 4 * u; i++) fill(rx + rw - 12 * u + i, cy - 2 * u + i, 8 * u - 2 * i, 1, COL_DIM);
-    /* speaker (crossed out when off, dim without an output device) and volume slider */
+    /* sound button: speaker (crossed out when off, dim without an output device) and a small arrow */
     {
-        int ax, aw, sx, sw; snd_area(&ax, &aw, &sx, &sw);
-        int off = !g_snd_on || g_snd_vol <= 0;
-        uint32_t ic = g_snd_dev < 0 ? COL_DIM : COL_ICON;
-        fill(ax + 2 * u, cy - 3 * u, 4 * u, 6 * u, ic);
-        for (int i = 0; i < 6 * u; i++) fill(ax + 6 * u + i, cy - 3 * u - i, 1, 6 * u + 2 * i, ic);
-        if (off)
-            for (int i = 0; i < 8 * u; i++) { fill(ax + 14 * u + i, cy - 4 * u + i, 2 * u, u, COL_WAIT); fill(ax + 14 * u + i, cy + 3 * u - i, 2 * u, u, COL_WAIT); }
-        else
-            for (int k = 1; k <= 2; k++) if (g_snd_vol > (k - 1) * 0.5f) fill(ax + 13 * u + 4 * (k - 1) * u, cy - (2 + 2 * k) * u, 2 * u, (4 + 4 * k) * u, ic);
-        int kx = sx + (int)(g_snd_vol * sw + 0.5f);
-        fill(sx, cy - u, sw, 2 * u, COL_TRACK);
-        fill(sx, cy - u, kx - sx, 2 * u, off ? COL_DIM : COL_PLAYED);
-        fill(kx - 2 * u, cy - 6 * u, 4 * u, 12 * u, off ? COL_DIM : COL_ICON);
+        int bx, bw; snd_button(&bx, &bw);
+        fill(bx, cy - 11 * u, bw, 22 * u, g_vmenu ? 0x3a3a3a : COL_MENU);
+        draw_speaker(bx + 5 * u, cy, g_snd_dev < 0 ? COL_DIM : COL_ICON);
+        for (int i = 0; i < 4 * u; i++) fill(bx + bw - 10 * u + i, cy - 2 * u + i, 8 * u - 2 * i, 1, COL_DIM);
     }
 
     int x0, x1; track_x(&x0, &x1);
@@ -1705,6 +1716,22 @@ static void draw_menu(void) {
         if (on) fill(x + 8 * g_ui, y + i * ih + ih / 2 - 3 * g_ui, 6 * g_ui, 6 * g_ui, COL_PLAYED);
         text(x + 22 * g_ui, y + i * ih + 6 * g_ui, MENU_TEXT[i], on ? COL_ICON : COL_DIM, 0);
     }
+}
+
+static void draw_vmenu(void) {
+    int u = g_ui, x, y, w, h, sy0, sy1, my; vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &my);
+    int off = !g_snd_on || g_snd_vol <= 0, cx = x + w / 2;
+    fill(x, y, w, h, COL_MENU);
+    frame_rect(x, y, w, h, u, COL_SEP);
+    text(cx - text_width("Volume") / 2, y + 6 * u, "Volume", COL_DIM, 0);
+    int ky = sy1 - (int)(g_snd_vol * (sy1 - sy0) + 0.5f);
+    fill(cx - u, sy0, 2 * u, sy1 - sy0, COL_TRACK);
+    fill(cx - u, ky, 2 * u, sy1 - ky, off ? COL_DIM : COL_PLAYED);
+    fill(cx - 6 * u, ky - 2 * u, 12 * u, 4 * u, off ? COL_DIM : COL_ICON);
+    fill(x + u, my, w - 2 * u, u, COL_SEP);
+    int ry = my + (h - (my - y)) / 2;
+    draw_speaker(x + 8 * u, ry, !g_snd_on ? COL_ICON : COL_DIM);
+    text(x + 34 * u, ry - font_h() / 2, "Mute (M)", !g_snd_on ? COL_ICON : COL_DIM, 0);
 }
 
 /* drag over the window: top half replaces the timeline, bottom half appends */
@@ -1806,6 +1833,7 @@ static void draw(void) {
     if (g_panel == 1) draw_help();
     if (g_panel == 2) draw_info();
     if (g_menu) draw_menu();
+    if (g_vmenu) draw_vmenu();
     if (g_toast[0] && now() < g_toast_until) {
         int w = text_width(g_toast) + 24 * g_ui, h = font_h() + 12 * g_ui, x = (g_ww - w) / 2;
         int y = (bar_visible() ? bar_top() : g_wh) - h - 12 * g_ui;   /* just above the bar, clear of the panels */
@@ -1904,7 +1932,7 @@ static void set_volume(float v, int save) {
     g_snd_vol = floorf(v * 100 + 0.5f) / 100;
     g_snd_on = 1;
     char m[64]; snprintf(m, sizeof m, "Volume %d %%", (int)(g_snd_vol * 100 + 0.5f));
-    toast(m);
+    if (!g_vmenu) toast(m);
     if (save) save_scale();
     g_dirty = 1;
 }
@@ -2035,7 +2063,7 @@ static void key(int k) {
     case K_HELP: toggle_panel(1); break;
     case K_INFO: toggle_panel(2); break;
     case K_ESC:
-        if (g_menu) { g_menu = 0; g_dirty = 1; }
+        if (g_menu || g_vmenu) { g_menu = g_vmenu = 0; g_dirty = 1; }
         else if (g_panel) { g_panel = 0; g_dirty = 1; }
         else if (g_fullscreen) toggle_fullscreen();
         break;
@@ -2049,14 +2077,15 @@ static void handle(const Event *e) {
     case EV_QUIT: exit(0);
     case EV_REDRAW: g_dirty = 1; break;
     case EV_KEY: key(e->key); break;
-    case EV_WHEEL: {        /* over the sound controls: level; elsewhere: frames */
-        int ax, aw, sx, sw; snd_area(&ax, &aw, &sx, &sw);
-        if (in_bar && e->x >= ax && e->x < ax + aw + 4 * u) set_volume(g_snd_vol - 0.05f * e->key, 1);
+    case EV_WHEEL: {        /* over the sound button or its panel: level; elsewhere: frames */
+        int bx, bw, x, y, w, h, sy0, sy1, my; snd_button(&bx, &bw); vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &my);
+        if ((in_bar && e->x >= bx && e->x < bx + bw) || (g_vmenu && e->x >= x && e->x < x + w && e->y >= y && e->y < y + h))
+            set_volume(g_snd_vol - 0.05f * e->key, 1);
         else if (NFR) go(g_cur + e->key);
         break;
     }
     case EV_DOUBLE:
-        if (!in_bar && !g_menu && !plat_alt()) { toggle_fullscreen(); break; }
+        if (!in_bar && !g_menu && !g_vmenu && !plat_alt()) { toggle_fullscreen(); break; }
         /* fall through: a quick second click on the controls is a normal click */
     case EV_DOWN: {
         if (g_menu) {                            /* open menu: a choice, or a click elsewhere closes it */
@@ -2065,17 +2094,24 @@ static void handle(const Event *e) {
             else { g_menu = 0; g_dirty = 1; }
             break;
         }
+        if (g_vmenu) {                           /* sound panel: slider, mute row; a click elsewhere closes it */
+            int x, y, w, h, sy0, sy1, my, bx, bw; vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &my); snd_button(&bx, &bw);
+            int inside = e->x >= x && e->x < x + w && e->y >= y && e->y < y + h;
+            if (inside && e->y >= my) toggle_sound();
+            else if (inside && e->y >= sy0 - 8 * u && e->y <= sy1 + 8 * u) { g_vol_drag = 1; set_volume((float)(sy1 - e->y) / (sy1 - sy0), 0); }
+            else if (!inside) { g_vmenu = 0; g_dirty = 1; if (in_bar && e->x >= bx && e->x < bx + bw) break; }
+            if (inside) break;
+        }
         if (!in_bar) {
             if (!NFR || g_dragfile) break;
             if (plat_alt()) { g_ruler = 1; g_ruler_x = e->x; g_ruler_y = e->y; g_ruler_cur = g_cur; g_playing = 0; g_dirty = 1; }
             else { g_pic_drag = 1; g_pic_moved = 0; g_pic_x = e->x; g_pic_cur = g_cur; }
             break;
         }
-        int x0, x1, rx, rw, ax, aw, sx, sw; track_x(&x0, &x1); res_button(&rx, &rw); snd_area(&ax, &aw, &sx, &sw);
+        int x0, x1, rx, rw, bx, bw; track_x(&x0, &x1); res_button(&rx, &rw); snd_button(&bx, &bw);
         if (e->x < 44 * u) toggle_play();
         else if (e->x >= rx && e->x < rx + rw) { g_menu = 1; g_dirty = 1; }
-        else if (e->x >= ax && e->x < sx - 3 * u) toggle_sound();
-        else if (e->x >= sx - 3 * u && e->x <= sx + sw + 4 * u) { g_vol_drag = 1; set_volume((float)(e->x - sx) / sw, 0); }
+        else if (e->x >= bx && e->x < bx + bw) { g_vmenu = 1; g_dirty = 1; }
         else if (e->x >= g_ww - 44 * u) toggle_fullscreen();
         else if (e->x >= x0 && e->x < x1 && e->y < track_cy() - 12 * u) {
             /* clip name row: play only that clip */
@@ -2092,7 +2128,7 @@ static void handle(const Event *e) {
         lx = e->x; ly = e->y;
         g_last_move = now();
         if (!g_bar_on) { g_bar_on = 1; plat_cursor(1); g_dirty = 1; }
-        if (g_vol_drag) { int ax, aw, sx, sw; snd_area(&ax, &aw, &sx, &sw); set_volume((float)(e->x - sx) / sw, 0); }
+        if (g_vol_drag) { int x, y, w, h, sy0, sy1, my; vmenu_rect(&x, &y, &w, &h, &sy0, &sy1, &my); set_volume((float)(sy1 - e->y) / (sy1 - sy0), 0); }
         else if (g_dragging) { update_shift(); seek_x(e->x); }
         else if (g_pic_drag) { update_shift(); picture_drag(e->x); }
         else if (g_ruler) {
@@ -2238,7 +2274,7 @@ int main(int argc, char **argv) {
             fflush(stdout);
         }
         if (g_toast[0] && t >= g_toast_until) { g_toast[0] = 0; g_dirty = 1; }
-        if (g_fullscreen && g_bar_on && g_playing && !g_dragging && !g_panel && !g_menu && t - g_last_move > 2.0) {
+        if (g_fullscreen && g_bar_on && g_playing && !g_dragging && !g_panel && !g_menu && !g_vmenu && t - g_last_move > 2.0) {
             g_bar_on = 0; plat_cursor(0); g_dirty = 1;
         }
         static int bar_shown;
