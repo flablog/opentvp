@@ -78,6 +78,7 @@ Frames are numbered from 0, as in the project settings (the TVPaint timeline sho
 - `exposures`: the same information, grouped into blocks (start, duration, file). Present in `--keyframes` mode.
 - `key_frames`: the frames where a new drawing appears.
 - `camera.track`: the camera frame by frame (centre in canvas pixels, rotation in degrees, TVPaint zoom), to redo the framing in the compositing software. The relation is: `output − output_centre = R(rotation) · (canvas − centre) / zoom`.
+- `sound` (Python only for now, with `--sound`, when the clip has sound tracks): `{"file": "Clip_001.wav", "start_frame": 0, "rate": 48000}`. The WAV is the mix of the clip's tracks, 48 kHz stereo 24-bit; its first sample is the start of `start_frame` (the first frame of the range), and it lasts exactly the range.
 
 ## Recompositing the shot
 

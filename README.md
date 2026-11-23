@@ -36,7 +36,7 @@ Binaries are in the **Releases**: `opentvp-X.Y.Z-windows.zip`, `-macos.zip` (uni
 | folder | content |
 |---|---|
 | `c/` | the shipped tools: `opentvp.c`, the player `opentvp-play.c` (includes `opentvp.c`), libdeflate (MIT), X11 headers (MIT); `build.sh`, `package.sh` |
-| `python/` | reference implementation (prototyping), same outputs as the C |
+| `python/` | reference implementation (prototyping), same outputs as the C; the sound export (`--sound`, `opentvp_sound.py`) is Python only for now |
 | `corpus/` | George scripts that generate the test files, and those files with TVPaint ground truth |
 | `tests/` | comparison of both implementations with TVPaint ground truth |
 | `docs/` | format, user guide, export JSON format |

@@ -13,6 +13,9 @@ Options:
     --scale S           output scale factor (e.g. 0.5 for a preview)
     --blur-samples N    number of motion blur samples (8)
     --prefix NAME       image prefix (default: clip name)
+    --sound             also writes the mix of the clip's sound tracks: <prefix>.wav
+                        (48 kHz stereo 24-bit, the duration of the frames; see opentvp_sound.py)
+    --sound-map OLD=NEW replace the OLD path prefix of the sound files by NEW (repeatable)
 
 Layer-by-layer export (see LAYER_EXPORT.md):
     --layers [LIST]     exports each layer to its own folder: all (default,
@@ -53,6 +56,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import opentvp_info as ti                                     # noqa: E402
+import opentvp_sound as ts                                    # noqa: E402
 from proto import (chunks, zchk_unwrap, unpackbits_bgra,   # noqa: E402
                    _decode_chain, frame_sources)
 
@@ -653,6 +657,11 @@ def export_layers(a):
         with multiprocessing.get_context('fork').Pool(jobs) as pool:
             doc['layers'] = pool.map(_run_layer_job, sel, chunksize=1)
 
+    if a.sound:
+        wname = safe_name(clip['name']) + '.wav'
+        if ts.export_sound(info, clip, f0, f1, os.path.join(a.out, wname), ts.parse_map(a.sound_map)):
+            doc['sound'] = {'file': wname, 'start_frame': f0, 'rate': ts.OUT_RATE}
+
     jname = a.json or f"{safe_name(clip['name'])}_{'exposure' if a.keyframes else 'layers'}.json"
     with open(os.path.join(a.out, jname), 'w', encoding='utf-8') as fh:
         json.dump(doc, fh, ensure_ascii=False, indent=1)
@@ -672,6 +681,10 @@ def main(argv):
     ap.add_argument('--scale', type=float, default=1.0)
     ap.add_argument('--blur-samples', type=int, default=8)
     ap.add_argument('--prefix')
+    ap.add_argument('--sound', action='store_true',
+                    help="also write the mix of the clip's sound tracks as a WAV")
+    ap.add_argument('--sound-map', action='append', metavar='OLD=NEW',
+                    help="replace the OLD path prefix of the sound files by NEW (repeatable)")
     g = ap.add_argument_group('per-layer export')
     g.add_argument('--layers', nargs='?', const='all',
                    help="export layers separately: all (default) or a \"name,name,3\" list")
@@ -714,6 +727,8 @@ def main(argv):
         to_image(img, bg, r.last_cover).save(os.path.join(a.out, f'{prefix}_{f:04d}.png'))
         print(f"  frame {f}", end='\r', flush=True)
     print(f"\n{f1 - f0 + 1} images in {time.time() - t_start:.1f} s")
+    if a.sound:
+        ts.export_sound(r.info, c, f0, f1, os.path.join(a.out, prefix + '.wav'), ts.parse_map(a.sound_map))
     return 0
 
 
