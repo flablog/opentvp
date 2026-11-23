@@ -164,3 +164,19 @@ The output size is `Camera.Width × Camera.Height`. A zoom > 1 shows a larger ar
 - `tv_MarkIn n "set"`, `tv_MarkOut n "set"`, `tv_LayerDisplay lid "off"`, `tv_LayerLock lid "on"`, `tv_LayerPreBehavior` / `tv_LayerPostBehavior lid "repeat|pingpong|hold|none"`.
 - `tv_ClipName` does not rename the first clip; `tv_ClipNew "name"` works.
 - The scripts' output folder is set by the `base` variable at the top of the script, never hard-coded.
+
+## 8. Sound (production file + `corpus/data/13_son`; offsets not confirmed yet)
+
+- **Not embedded**: a `.tvpp` holds no audio data, only the path of each sound file. A file moved or renamed is lost to the project.
+- **Two levels**: project tracks in the project INI section `04566928` (`[sound]`, then `[sound+N]`), clip tracks in the clip INI (`FCFG`, `[audio]`, then `[audio+N]`), N from 0. Each level has `trackcount`, `volume`, `mute`, `disclosed`, `annotation.count`. A clip without sound still has `[audio]` with `trackcount=0`.
+- **One section per track**, same keys at both levels:
+  - `filepath`: absolute path, as saved (Windows or Mac paths).
+  - `offset`: start of the sound on the timeline, in seconds (0 = frame 0). Not yet seen other than 0.
+  - `volume`: gain, presumably linear (0.5 = half amplitude; no export measured yet). `mute`: 0/1; a muted track is left out of the mix.
+  - `envelopein`, `envelopein2`: fade-in ramp, **linear in amplitude**, from 0 at `envelopein` to full at `envelopein2`, in seconds of the sound file (B05_fades_1s_keyframes: 0 → 0.513542, measured on TVPaint's export within 1 %).
+  - `envelopeout`, `envelopeout2`: fade-out ramp, presumably from full at `envelopeout` to 0 at `envelopeout2`. Without a fade both hold the last sample time: (n − 1) / rate for 16-bit WAVs (3.99998 for 4 s), the duration for the 24-bit one (4).
+  - `locked`, `coloridx`, `disclosed`, `annotation.count`: interface.
+- **Mix** (TVPaint's movie export, AAC): the sum of the unmuted tracks, each × `volume` × envelope; stereo kept as is (a right channel at half amplitude stays at half). 44.1 kHz mono and 24-bit sources load (A02, A03), their export is not measured yet. Sound starts on frame 0 (the AAC export adds its usual 1024-sample encoder delay).
+- A **clip** exported alone (D02, 2 s clip of a project whose 4 s sound is a project track) has **no audio stream**: project tracks are not exported with a single clip.
+- `[timelineaudio]` `soundpanelmode` is interface state.
+- George: `tv_SoundClipNew path` / `tv_SoundProjectNew path` add a track; `tv_SoundClipAdjust idx mute volume …` / `tv_SoundProjectAdjust` set mute and volume, but the offset and fades given after them were ignored.

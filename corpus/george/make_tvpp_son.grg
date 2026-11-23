@@ -1,0 +1,164 @@
+// ============================================================
+// make_tvpp_son.grg — corpus son : pistes de clip et de projet
+//
+// Avant de lancer : générer les sons sources dans <base>/sources_son :
+//   python corpus/make_sound_sources.py C:/projets/nebuleuse/TECH/test_tvpp/sorties/sources_son
+//   tick_ref.wav  bip 1 kHz de 50 ms au début de chaque seconde (n + 1 impulsions à la seconde n)
+//   tone_ref.wav  440 Hz continu, demi-amplitude
+//   tick_mono.wav (44,1 kHz mono), tick_hd.wav (48 kHz 24 bits)
+//
+// Chaque projet : 64×64, 24 i/s, un calque « duree » tenu 96 images (4 s, images 0 à 95).
+// Vérité terrain : après chaque réglage, la réponse de tv_SoundClipInfo / tv_SoundProjectInfo
+// devient le nom d'un calque « info… » (lisible avec opentvp info), et le CSV de structure.
+//
+// À VÉRIFIER (commandes son écrites sans la doc sous la main) :
+//   tv_SoundClipAdjust piste mute volume offset fadein fadeout
+//   (offset et fondus supposés en secondes, pistes numérotées depuis 0).
+//   Si l'ordre est faux, les calques « info… » le montreront : corriger Regle() et relancer.
+// ============================================================
+
+base = "C:/projets/nebuleuse/TECH/test_tvpp/sorties"
+sons = CONCAT(base, "/sources_son")
+tick = CONCAT(sons, "/tick_ref.wav")
+tone = CONCAT(sons, "/tone_ref.wav")
+tickmono = CONCAT(sons, "/tick_mono.wav")
+tickhd = CONCAT(sons, "/tick_hd.wav")
+
+// ---------- A : une piste de clip, formats ----------
+Plan(base, "A01_clip_tick", 24)
+PisteClip(tick, 0, 0, 1, 0, 0, 0)
+Fin(base, "A01_clip_tick")
+
+Plan(base, "A02_clip_tick_mono", 24)
+PisteClip(tickmono, 0, 0, 1, 0, 0, 0)
+Fin(base, "A02_clip_tick_mono")
+
+Plan(base, "A03_clip_tick_hd", 24)
+PisteClip(tickhd, 0, 0, 1, 0, 0, 0)
+Fin(base, "A03_clip_tick_hd")
+
+// ---------- B : réglages d'une piste de clip ----------
+Plan(base, "B01_volume_half", 24)
+PisteClip(tone, 0, 0, 0.5, 0, 0, 0)
+Fin(base, "B01_volume_half")
+
+Plan(base, "B02_mute", 24)
+PisteClip(tone, 0, 1, 1, 0, 0, 0)
+Fin(base, "B02_mute")
+
+Plan(base, "B03_offset_plus_1s", 24)
+PisteClip(tick, 0, 0, 1, 1, 0, 0)
+Fin(base, "B03_offset_plus_1s")
+
+Plan(base, "B04_offset_minus_half", 24)
+PisteClip(tick, 0, 0, 1, -0.5, 0, 0)
+Fin(base, "B04_offset_minus_half")
+
+Plan(base, "B05_fades_1s", 24)
+PisteClip(tone, 0, 0, 1, 0, 1, 1)
+Fin(base, "B05_fades_1s")
+
+// ---------- C : plusieurs pistes ----------
+Plan(base, "C01_two_tracks", 24)
+PisteClip(tick, 0, 0, 1, 0, 0, 0)
+PisteClip(tone, 1, 0, 0.25, 0, 0, 0)
+Fin(base, "C01_two_tracks")
+
+// ---------- D : piste de projet ----------
+Plan(base, "D01_project_tick", 24)
+PisteProjet(tick, 0, 0, 1, 0, 0, 0)
+Fin(base, "D01_project_tick")
+
+// deux clips de 2 s, une piste de projet de 4 s : comment se répartit-elle ?
+Plan(base, "D02_project_two_clips", 24)
+tv_LayerKill duree
+DureeClip(47)
+tv_ClipNew "CLIP_B"
+DureeClip(47)
+PisteProjet(tick, 0, 0, 1, 0, 0, 0)
+Fin(base, "D02_project_two_clips")
+
+// piste de clip sur le second clip seulement
+Plan(base, "D03_clip_on_second", 24)
+tv_LayerKill duree
+DureeClip(47)
+tv_ClipNew "CLIP_B"
+DureeClip(47)
+PisteClip(tick, 0, 0, 1, 0, 0, 0)
+Fin(base, "D03_clip_on_second")
+
+// ---------- E : cadence ----------
+Plan(base, "E01_fps_twentyfive", 25)
+PisteClip(tick, 0, 0, 1, 0, 0, 0)
+Fin(base, "E01_fps_twentyfive")
+
+tv_Warn "Corpus son terminé"
+
+// ============================================================
+// FONCTIONS
+// ============================================================
+
+// Nouveau projet 64×64 avec un calque « duree » de 96 images (son id dans la globale duree).
+FUNCTION Plan(pbase, pname, fps)
+	LOCAL ppath
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_ProjectNew ppath 64 64 1.0 fps "none" 0
+	DureeClip(95)
+END
+
+// Calque anim « duree » tenu de l'image 0 à last, dans le clip courant.
+// duree n'est pas LOCAL : c'est une globale, lue par le programme principal.
+FUNCTION DureeClip(last)
+	tv_LayerCreate "duree"
+	duree = result
+	tv_LayerSet duree
+	tv_LayerAnim duree
+	tv_SetAPen 128 128 128
+	tv_RectFill 40 40 48 48
+	tv_ExposureAdd 0 last
+END
+
+// Ajoute une piste au clip courant, la règle, et garde la réponse de tv_SoundClipInfo.
+FUNCTION PisteClip(path, idx, mute, vol, offset, fin, fout)
+	LOCAL nom
+	tv_SoundClipNew path
+	tv_SoundClipAdjust idx mute vol offset fin fout
+	tv_SoundClipInfo idx
+	nom = CONCAT("info clip ", result)
+	Info(nom)
+END
+
+// Idem pour une piste du projet.
+FUNCTION PisteProjet(path, idx, mute, vol, offset, fin, fout)
+	LOCAL nom
+	tv_SoundProjectNew path
+	tv_SoundProjectAdjust idx mute vol offset fin fout
+	tv_SoundProjectInfo idx
+	nom = CONCAT("info project ", result)
+	Info(nom)
+END
+
+// Calque vide dont le nom porte la réponse de TVPaint (vérité terrain lisible sans TVPaint).
+FUNCTION Info(nom)
+	LOCAL lid
+	tv_LayerCreate "info"
+	lid = result
+	tv_LayerRename lid nom
+END
+
+// Valide le dernier tracé, sauve le projet et sa structure CSV, ferme.
+FUNCTION Fin(pbase, pname)
+	LOCAL ppath gt
+	ppath = CONCAT(pbase, "/")
+	ppath = CONCAT(ppath, pname)
+	gt = CONCAT(ppath, "_gt")
+	ppath = CONCAT(ppath, ".tvpp")
+	tv_UpdateUndo
+	tv_LayerCreate "tmp_commit"
+	tv_LayerKill result
+	tv_SaveProject ppath
+	tv_ClipSaveStructure gt "CSV"
+	tv_ProjectClose
+END
