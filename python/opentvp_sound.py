@@ -5,13 +5,15 @@
 Usage:
     python opentvp_sound.py shot.tvpp out.wav [--clip N] [--frames A-B] [--sound-map OLD=NEW ...]
 
-Also used by opentvp_render.py --sound. Python only for now (the C tools do not mix sound yet).
+Also used by opentvp_render.py --sound. The C version (opentvp render --sound) gives the same
+WAV, byte for byte: keep the order of the operations below when changing them, on both sides.
 
 The .tvpp holds no audio: each track gives the path of a sound file (docs/FORMAT.md section 8).
 The mix follows TVPaint's movie export, measured on corpus/data/13_son:
   * the clip's unmuted tracks, summed; project tracks are left out, as in TVPaint's clip export;
   * each track × its volume (linear) × its fades (linear ramps, in seconds of the sound file);
-  * the sound starts at offset seconds on the clip timeline (offset not confirmed yet);
+  * the sound starts at offset seconds on the clip timeline, snapped to a whole 48 kHz sample
+    (one sample later when the offset is negative);
   * output: 48 kHz, stereo, 24-bit, exactly the duration of the frames (f1 - f0 + 1) / fps.
 Sound files: WAV only (PCM 8, 16, 24, 32 bits or float; mono is played on both channels,
 other rates are resampled linearly). Other formats are reported and skipped.
@@ -118,10 +120,18 @@ def mix_clip(clip, fps, f0, f1, mapping=(), log=print):
             continue
         try:
             rate, x = read_wav(path)
-        except (ValueError, OSError) as e:
+        except ValueError as e:
             log(f"  ⚠ sound track {tr['index']}: {e}, skipped: {path}")
             continue
-        s = t - tr['offset']                       # time in the sound file
+        except OSError:
+            log(f"  ⚠ sound track {tr['index']}: cannot read the file, skipped: {path}")
+            continue
+        # TVPaint places the sound on a whole 48 kHz sample (B03: +47900.016 -> +47900); with a
+        # negative offset it cuts one sample too few from the start (B04: -10550.016 -> -10549)
+        k = round(tr['offset'] * OUT_RATE)
+        if tr['offset'] < 0:
+            k += 1
+        s = t - k / OUT_RATE                       # time in the sound file
         pos = s * rate
         j = np.floor(pos)
         a = (pos - j)[:, None]

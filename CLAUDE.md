@@ -5,9 +5,9 @@ A personal project of Flavio Perez (not a Les Fées Spéciales project, see the 
 ## Layout
 
 - `c/`: the shipped tool (`opentvp`, `opentvp.exe`, `opentvp-macos`). A single source file, `c/opentvp.c`, plus `c/third_party/libdeflate` (MIT). The player `c/opentvp-play.c` is a separate binary that `#include`s `opentvp.c` (with `OPENTVP_NO_MAIN`) and adds a minimal window layer: Win32 GDI (+ OLE drop target), or X11 loaded with `dlopen` (+ XDND) (headers vendored in `c/third_party/x11`). Its text uses the Spleen bitmap font, generated into `c/third_party/spleen/spleen.h` by `gen_font.py`. No macOS window layer yet: it needs a Mac to build and test. Build: `c/build.sh` (native) or `c/build.sh all` (Windows, universal Mac, static Linux, via `pip install ziglang`).
-- `python/`: reference implementation, slower but easy to change. `opentvp_info.py` (structure, no dependencies), `opentvp_render.py` (rendering and per-layer export, numpy + Pillow), `proto.py` (pixel decoding). New features are prototyped here, then ported to C.
+- `python/`: reference implementation, slower but easy to change. `opentvp_info.py` (structure, no dependencies), `opentvp_render.py` (rendering and per-layer export, numpy + Pillow), `proto.py` (pixel decoding), `opentvp_sound.py` (sound mix, used by `--sound`). New features are prototyped here, then ported to C.
 - `corpus/`: `george/` holds the scripts that generate the corpus in TVPaint; `data/` holds the resulting files, with TVPaint ground truth (`*_gt.csv`, `*_gt.layers/`, `render_*.png`). `camera_refs.json` maps each camera file to its renders.
-- `tests/`: `run_all.sh` runs everything. `check_layers.py` compares the per-layer export with ground truth (must stay at 0 failures). `check_camera.py` compares camera renders with `baseline_camera.json` (no regression).
+- `tests/`: `run_all.sh` runs everything. `check_layers.py` compares the per-layer export with ground truth (must stay at 0 failures). `check_camera.py` compares camera renders with `baseline_camera.json` (no regression). `check_sound.py`: C and Python WAVs identical byte for byte, and close to TVPaint's movie exports (`corpus/data/13_son`, needs ffmpeg for the second part).
 - `docs/`: `FORMAT.md` (specification), `USAGE.md` (executable user guide), `LAYER_EXPORT.md` (JSON format).
 
 ## Rules
@@ -28,5 +28,6 @@ A personal project of Flavio Perez (not a Les Fées Spéciales project, see the 
 - Residual camera model error (≤ 0.7 % of the movement).
 - Validation of blending modes other than Color; unsupported modes (Shade, Light, Hue, Colorize, SoftLight…).
 - TVPaint 12: regenerate the corpus with the same scripts and compare.
-- Sound, reference and folder layers: not studied.
+- Sound (`docs/FORMAT.md` §8): info and WAV export done. To do: playback in the player; fade-out direction not measured yet; project tracks are left out like TVPaint's clip export (whole-project export not studied); WAV sources only.
+- Reference and folder layers: not studied.
 - After Effects import (ExtendScript reading the exposure JSON).

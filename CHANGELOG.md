@@ -6,7 +6,8 @@ Versions follow the `VERSION` file; a release is a `vX.Y.Z` tag. Frame numbers h
 
 ### Added
 - `opentvp info` lists the sound tracks of the project and of each clip: file path (flagged when not found), offset, volume, mute and fades, as text and in the JSON (`sound`). TVPaint does not store the audio in the `.tvpp`, only the path of each file.
-- Sound export, Python only for now: `opentvp_render.py --sound` writes the mix of the clip's sound tracks as a 48 kHz stereo 24-bit WAV, the duration of the rendered frames (volume, mute and fades as in TVPaint's movie export; WAV sources only). `--sound-map OLD=NEW` rewrites the path of the sound files. Also standalone: `opentvp_sound.py`.
+- Sound export: `opentvp render --sound` (and `opentvp_render.py --sound`) writes the mix of the clip's sound tracks as a 48 kHz stereo 24-bit WAV, the duration of the rendered frames (offset, volume, mute and fades as in TVPaint's movie export, to the sample; WAV sources only, other formats are reported and skipped). `--sound-map OLD=NEW` rewrites the path of the sound files. Also standalone in Python: `opentvp_sound.py`.
+- The build disables FMA contraction (`-ffp-contract=off`), so that C and Python compute the same floating-point results on every platform.
 
 ### Changed
 - License: public domain (CC0 1.0) instead of the GPL v3 or later. Releases up to 0.4.0 stay available under the GPL.

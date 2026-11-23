@@ -171,7 +171,7 @@ The output size is `Camera.Width × Camera.Height`. A zoom > 1 shows a larger ar
 - **Two levels**: project tracks in the project INI section `04566928` (`[sound]`, then `[sound+N]`), clip tracks in the clip INI (`FCFG`, `[audio]`, then `[audio+N]`), N from 0. Each level has `trackcount`, `volume`, `mute`, `disclosed`, `annotation.count`. A clip without sound still has `[audio]` with `trackcount=0`.
 - **One section per track**, same keys at both levels:
   - `filepath`: absolute path, as saved (Windows or Mac paths).
-  - `offset`: start of the sound on the timeline, in seconds (0 = frame 0). Not yet seen other than 0.
+  - `offset`: start of the sound on the timeline, in seconds (0 = frame 0), rounded to 6 significant digits. TVPaint places the sound on a whole 48 kHz sample: B03, `offset=0.997917` (47900.016 samples), is exported 47900 samples late, to the sample. With a negative offset it cuts one sample too few from the start of the sound: B04, `offset=-0.219792` (−10550.016), is exported at −10549.
   - `volume`: linear gain (B01: 0.5 gives 0.4999 on the export). `mute`: 0/1; a muted track is left out of the mix.
   - `envelopein`, `envelopein2`: fade-in ramp, **linear in amplitude**, from 0 at `envelopein` to full at `envelopein2`, in seconds of the sound file (B05_fades_1s_keyframes: 0 → 0.513542, measured on TVPaint's export within 1 %).
   - `envelopeout`, `envelopeout2`: fade-out ramp, presumably from full at `envelopeout` to 0 at `envelopeout2`. Without a fade both hold the last sample time: (n − 1) / rate for 16-bit WAVs (3.99998 for 4 s), the duration for the 24-bit one (4).

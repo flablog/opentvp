@@ -35,6 +35,8 @@ opentvp render file.tvpp folder --layers                one folder per layer, ev
 | `--blur-samples N` | camera motion blur samples (default 8) |
 | `--threads N` | number of cores used (default: all) |
 | `--prefix NAME` | PNG prefix (default: clip name) → `NAME_0000.png`, … |
+| `--sound` | also writes the mix of the clip's sound tracks: `NAME.wav` (with `--layers`: `<clip>.wav`, named in the JSON) |
+| `--sound-map OLD=NEW` | the sound files are looked for under NEW instead of OLD (repeatable), e.g. on a render farm |
 | `--png-level N` | PNG compression 0-12 (default 6) |
 
 ## Player: opentvp-play

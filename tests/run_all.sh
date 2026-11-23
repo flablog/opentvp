@@ -8,3 +8,4 @@ PY=${PYTHON:-$(python3 -c '' 2>/dev/null && echo python3 || echo python)}
 $PY tests/check_layers.py --impl c
 $PY tests/check_layers.py --impl python
 $PY tests/check_camera.py --impl c
+$PY tests/check_sound.py

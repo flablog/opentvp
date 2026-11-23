@@ -11,7 +11,7 @@ D=third_party/libdeflate/lib
 LIB="$D/deflate_compress.c $D/deflate_decompress.c $D/zlib_compress.c $D/zlib_decompress.c $D/adler32.c $D/crc32.c $D/utils.c $D/x86/cpu_features.c $D/arm/cpu_features.c"
 SRC="opentvp.c $LIB"
 PLAY="opentvp-play.c $LIB"
-FLAGS="-O3 -Ithird_party/libdeflate -DOPENTVP_VERSION=\"$VERSION\""
+FLAGS="-O3 -ffp-contract=off -Ithird_party/libdeflate -DOPENTVP_VERSION=\"$VERSION\""
 PLAY_WIN="-lshell32 -lgdi32 -luser32 -lwinmm -lole32"
 PLAY_X11="-Ithird_party/x11 -lm -lpthread -ldl"
 PY=${PYTHON:-$(python3 -c '' 2>/dev/null && echo python3 || echo python)}

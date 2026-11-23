@@ -15,6 +15,7 @@
 #ifndef OPENTVP_VERSION
 #define OPENTVP_VERSION "dev"
 #endif
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -1449,6 +1450,173 @@ static int select_layer(const Clip *C, const char *tok) {
     return -1;
 }
 
+/* ------------------------------------------------------------------ sound mix (python/opentvp_sound.py)
+ * Same WAV as the Python, byte for byte: same operations in the same order, and no FMA
+ * contraction (build.sh: -ffp-contract=off). */
+
+#define SND_RATE 48000
+static int g_sound = 0;                       /* --sound */
+static const char *g_sound_map[64][2];        /* --sound-map OLD=NEW */
+static int g_nsound_map = 0;
+
+typedef struct { int rate; long long n; double *x; } Wav;   /* x: n frames x 2 channels */
+
+static uint32_t le32(const uint8_t *p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
+static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
+
+/* returns NULL on success, otherwise the reason (same texts as the Python) */
+static const char *wav_read(const char *path, Wav *W, char *why, size_t whyn) {
+    memset(W, 0, sizeof *W);
+    FILE *f = fopen_u8(path, "rb");
+    if (!f) return "cannot read the file";
+    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
+    if (sz < 0) { fclose(f); return "cannot read the file"; }
+    uint8_t *d = xmalloc((size_t)sz + 1);
+    size_t got = fread(d, 1, (size_t)sz, f); fclose(f);
+    if (got != (size_t)sz) { free(d); return "cannot read the file"; }
+    if (sz < 12 || memcmp(d, "RIFF", 4) || memcmp(d + 8, "WAVE", 4)) { free(d); return "not a WAV file"; }
+    const uint8_t *fmt = NULL, *data = NULL; size_t fmtn = 0, datan = 0;
+    for (size_t i = 12; i + 8 <= (size_t)sz; ) {
+        size_t n = le32(d + i + 4), avail = (size_t)sz - (i + 8);
+        size_t bn = n < avail ? n : avail;
+        if (!memcmp(d + i, "fmt ", 4)) { fmt = d + i + 8; fmtn = bn; }
+        else if (!memcmp(d + i, "data", 4)) { data = d + i + 8; datan = bn; }
+        i += 8 + n + (n & 1);
+    }
+    if (!fmt || !data || fmtn < 16) { free(d); return "incomplete WAV file"; }
+    int kind = le16(fmt), ch = le16(fmt + 2), bits = le16(fmt + 14);
+    W->rate = (int)le32(fmt + 4);
+    if (kind == 0xFFFE && fmtn >= 26) kind = le16(fmt + 24);
+    int width = bits / 8;
+    if (ch < 1 || W->rate < 1 || width < 1) { free(d); return "invalid WAV header"; }
+    if (!((kind == 1 && (bits == 8 || bits == 16 || bits == 24 || bits == 32)) || (kind == 3 && (bits == 32 || bits == 64)))) {
+        snprintf(why, whyn, "unsupported WAV encoding (format %d, %d bits)", kind, bits);
+        free(d); return why;
+    }
+    W->n = (long long)(datan / ((size_t)width * ch));
+    W->x = xmalloc(sizeof(double) * 2 * (size_t)(W->n ? W->n : 1));
+    for (long long i = 0; i < W->n; i++) {
+        double v[2] = {0, 0};
+        for (int c = 0; c < ch && c < 2; c++) {
+            const uint8_t *p = data + ((size_t)i * ch + c) * width;
+            double s;
+            if (kind == 1 && bits == 8) s = ((double)p[0] - 128) / 128;
+            else if (kind == 1 && bits == 16) s = (double)(int16_t)le16(p) / 32768;
+            else if (kind == 1 && bits == 24) { int32_t q = p[0] | p[1] << 8 | p[2] << 16; if (q >= 1 << 23) q -= 1 << 24; s = (double)q / 8388608; }
+            else if (kind == 1) s = (double)(int32_t)le32(p) / 2147483648.0;
+            else if (bits == 32) { float fl; memcpy(&fl, p, 4); s = fl; }
+            else { double db; memcpy(&db, p, 8); s = db; }
+            v[c] = s;
+        }
+        if (ch == 1) v[1] = v[0];
+        W->x[2 * i] = v[0]; W->x[2 * i + 1] = v[1];
+    }
+    free(d);
+    return NULL;
+}
+
+/* first OLD=NEW prefix that matches (slashes normalised, ASCII case-insensitive) */
+static char *sound_map_path(const char *path) {
+    char *p = strdup(path);
+    for (char *q = p; *q; q++) if (*q == '\\') *q = '/';
+    for (int m = 0; m < g_nsound_map; m++) {
+        char *o = strdup(g_sound_map[m][0]);
+        for (char *q = o; *q; q++) if (*q == '\\') *q = '/';
+        size_t ol = strlen(o), k = 0;
+        while (k < ol && p[k] && tolower((unsigned char)p[k]) == tolower((unsigned char)o[k])) k++;
+        free(o);
+        if (k == ol) {
+            const char *nw = g_sound_map[m][1];
+            char *r = xmalloc(strlen(nw) + strlen(p + ol) + 1);
+            strcpy(r, nw); strcat(r, p + ol);
+            for (char *q = r; *q; q++) if (*q == '\\') *q = '/';
+            free(p);
+            return r;
+        }
+    }
+    return p;
+}
+
+static double snd_envelope(double s, const double fin[2], const double fout[2]) {
+    double g = 1.0;
+    if (fin[1] > fin[0]) g = s < fin[0] ? 0.0 : (s < fin[1] ? (s - fin[0]) / (fin[1] - fin[0]) : g);
+    if (fout[1] > fout[0]) g = g * (s <= fout[0] ? 1.0 : (s < fout[1] ? (fout[1] - s) / (fout[1] - fout[0]) : 0.0));
+    return g;
+}
+
+/* writes the clip's mix (frames f0..f1, from 0) to path; returns 0 (nothing written) without tracks */
+static int export_sound(const Project *P, const Clip *C, int f0, int f1, const char *path) {
+    if (P->sound.n)
+        printf("  sound: %d project track(s) left out (TVPaint does not export them with a clip)\n", P->sound.n);
+    const Sound *S = &C->sound;
+    if (!S->n) { printf("  sound: the clip has no sound track, no WAV written\n"); return 0; }
+    long long n = (long long)rint((double)((long long)(f1 - f0 + 1) * SND_RATE) / P->fps);
+    if (n < 0) n = 0;
+    double *out = xcalloc(sizeof(double) * 2 * (size_t)(n ? n : 1));
+    double t0 = (double)f0 / P->fps;
+    int mixed = 0;
+    if (S->mute) printf("  sound: the clip's tracks are all muted\n");
+    else for (int k = 0; k < S->n; k++) {
+        const SoundTrack *T = &S->t[k];
+        if (T->mute) continue;
+        char *mp = sound_map_path(T->file);
+        FILE *fp = fopen_u8(mp, "rb");
+        if (!fp) { printf("  ⚠ sound track %d: file not found, skipped: %s\n", k + 1, mp); free(mp); continue; }
+        fclose(fp);
+        Wav W; char why[128];
+        const char *err = wav_read(mp, &W, why, sizeof why);
+        if (err) { printf("  ⚠ sound track %d: %s, skipped: %s\n", k + 1, err, mp); free(mp); continue; }
+        /* TVPaint places the sound on a whole 48 kHz sample (B03: +47900.016 -> +47900); with a
+           negative offset it cuts one sample too few from the start (B04: -10550.016 -> -10549) */
+        double ks = rint(T->offset * SND_RATE);
+        if (T->offset < 0) ks += 1;
+        double off = ks / SND_RATE;
+        for (long long i = 0; i < n; i++) {
+            double t = t0 + (double)i / SND_RATE;
+            double s = t - off;
+            double pos = s * W.rate;
+            double jf = floor(pos);
+            double a = pos - jf;
+            double gain = T->volume * S->volume * snd_envelope(s, T->fade_in, T->fade_out);
+            for (int c = 0; c < 2; c++) {
+                double lo = (jf >= 0 && jf < (double)W.n) ? W.x[2 * (long long)jf + c] : 0.0;
+                double hi = (jf + 1 >= 0 && jf + 1 < (double)W.n) ? W.x[2 * ((long long)jf + 1) + c] : 0.0;
+                double v = lo * (1 - a) + hi * a;
+                out[2 * i + c] = out[2 * i + c] + v * gain;
+            }
+        }
+        free(W.x); free(mp);
+    }
+    for (int k = 0; k < S->n; k++) if (!S->t[k].mute) mixed++;
+    /* 48 kHz stereo 24-bit PCM, clipped to [-1, 1] */
+    size_t dn = (size_t)n * 6;
+    uint8_t *b = xmalloc(44 + dn);
+    uint32_t hdr[11];
+    memcpy(b, "RIFF", 4); hdr[0] = (uint32_t)(36 + dn);
+    b[4] = hdr[0] & 255; b[5] = hdr[0] >> 8 & 255; b[6] = hdr[0] >> 16 & 255; b[7] = hdr[0] >> 24;
+    memcpy(b + 8, "WAVEfmt ", 8);
+    const uint8_t fmt[20] = {16, 0, 0, 0, 1, 0, 2, 0, SND_RATE & 255, SND_RATE >> 8 & 255, 0, 0,
+                             (SND_RATE * 6) & 255, (SND_RATE * 6) >> 8 & 255, (SND_RATE * 6) >> 16 & 255, 0, 6, 0, 24, 0};
+    memcpy(b + 16, fmt, 20);
+    memcpy(b + 36, "data", 4);
+    b[40] = dn & 255; b[41] = dn >> 8 & 255; b[42] = dn >> 16 & 255; b[43] = dn >> 24 & 255;
+    for (size_t i = 0; i < (size_t)n * 2; i++) {
+        double v = out[i];
+        v = v < -1.0 ? -1.0 : (v > 1.0 ? 1.0 : v);
+        int32_t q = (int32_t)floor(v * 8388607.0 + 0.5);
+        b[44 + 3 * i] = q & 255; b[45 + 3 * i] = q >> 8 & 255; b[46 + 3 * i] = q >> 16 & 255;
+    }
+    FILE *f = fopen_u8(path, "wb");
+    int ok = f && fwrite(b, 1, 44 + dn, f) == 44 + dn;
+    if (f) ok = fclose(f) == 0 && ok;
+    free(b); free(out);
+    if (!ok) die("cannot write the WAV");
+    const char *base = path + strlen(path);
+    while (base > path && base[-1] != '/' && base[-1] != '\\') base--;
+    printf("  sound: %s (%.3f s, %d track(s) mixed)\n", base, (f1 - f0 + 1) / P->fps, mixed);
+    return 1;
+}
+
 static int export_layers(LayerOpts *o) {
     time_t w_start = time(NULL);
     Project P = load_project(o->path);
@@ -1522,8 +1690,15 @@ static int export_layers(LayerOpts *o) {
 #endif
     free(th);
 
-    /* JSON */
     char jpath[2400], *cname = safe_name(C->name);
+    /* sound: <clip>.wav, named in the JSON */
+    char wname[1100]; int has_wav = 0;
+    if (g_sound) {
+        snprintf(wname, sizeof wname, "%s.wav", cname);
+        snprintf(jpath, sizeof jpath, "%s/%s", o->outdir, wname);
+        has_wav = export_sound(&P, C, o->f0, o->f1, jpath);
+    }
+    /* JSON */
     if (o->json) snprintf(jpath, sizeof jpath, "%s/%s", o->outdir, o->json);
     else snprintf(jpath, sizeof jpath, "%s/%s_%s.json", o->outdir, cname, o->keyframes ? "exposure" : "layers");
     FILE *js = fopen_u8(jpath, "wb");
@@ -1582,7 +1757,12 @@ static int export_layers(LayerOpts *o) {
         }
         fprintf(js, "\n   ]\n  }%s\n", j + 1 < nsel ? "," : "");
     }
-    fprintf(js, " ]\n}\n");
+    fprintf(js, " ]");
+    if (has_wav) {
+        fprintf(js, ",\n \"sound\": {\n  \"file\": "); json_str(js, wname);
+        fprintf(js, ",\n  \"start_frame\": %d,\n  \"rate\": %d\n }", o->f0, SND_RATE);
+    }
+    fprintf(js, "\n}\n");
     fclose(js);
     const char *jb = jpath + strlen(jpath);
     while (jb > jpath && jb[-1] != '/' && jb[-1] != '\\') jb--;
@@ -1609,7 +1789,10 @@ static void usage(void) {
         "  --scale S           output scale (e.g. 0.5 for a preview)\n"
         "  --blur-samples N    motion blur samples (8)\n"
         "  --threads N         number of threads (default: all cores)\n"
-        "  --prefix NAME       image prefix (default: clip name)\n\n"
+        "  --prefix NAME       image prefix (default: clip name)\n"
+        "  --sound             also write the mix of the clip's sound tracks: <prefix>.wav\n"
+        "                      (with --layers: <clip>.wav, named in the JSON)\n"
+        "  --sound-map OLD=NEW replace the OLD path prefix of the sound files by NEW (repeatable)\n\n"
         "layer-by-layer export (straight alpha images, whole canvas, + JSON):\n"
         "  --layers [LIST]     all visible layers, or \"name,name,3\" (numbers from opentvp info)\n"
         "  --keyframes         one image per drawing + exposure JSON (otherwise every frame)\n"
@@ -1688,6 +1871,14 @@ static int cmd_render(int argc, char **argv) {
         if (!strcmp(argv[i], "--skip-empty")) { lo.skip_empty = 1; continue; }
         if (!strcmp(argv[i], "--png-level") && i + 1 < argc) { png_level = atoi(argv[++i]); continue; }
         if (!strcmp(argv[i], "--json") && i + 1 < argc) { lo.json = argv[++i]; continue; }
+        if (!strcmp(argv[i], "--sound")) { g_sound = 1; continue; }
+        if (!strcmp(argv[i], "--sound-map") && i + 1 < argc) {
+            char *m = strdup(argv[++i]), *eq = strchr(m, '=');
+            if (!eq) { fprintf(stderr, "--sound-map expects OLD=NEW, got: %s\n", m); return 2; }
+            *eq = 0;
+            if (g_nsound_map < 64) { g_sound_map[g_nsound_map][0] = m; g_sound_map[g_nsound_map][1] = eq + 1; g_nsound_map++; }
+            continue;
+        }
         if (!strcmp(argv[i], "--clip") && i + 1 < argc) clip = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { if (sscanf(argv[++i], "%d-%d", &f0, &f1) == 1) f1 = f0; }
         else if (!strcmp(argv[i], "--bg") && i + 1 < argc) bgmode = argv[++i];
@@ -1728,6 +1919,10 @@ static int cmd_render(int argc, char **argv) {
     }
     (void)t_start;
     printf("\n%d images in %ld s\n", f1 - f0 + 1, (long)(time(NULL) - w_start));
+    if (g_sound) {
+        snprintf(fn, sizeof fn, "%s/%s.wav", outdir, pre);
+        export_sound(&P, C, f0, f1, fn);
+    }
     return 0;
 }
 
