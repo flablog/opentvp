@@ -172,11 +172,11 @@ The output size is `Camera.Width × Camera.Height`. A zoom > 1 shows a larger ar
 - **One section per track**, same keys at both levels:
   - `filepath`: absolute path, as saved (Windows or Mac paths).
   - `offset`: start of the sound on the timeline, in seconds (0 = frame 0). Not yet seen other than 0.
-  - `volume`: gain, presumably linear (0.5 = half amplitude; no export measured yet). `mute`: 0/1; a muted track is left out of the mix.
+  - `volume`: linear gain (B01: 0.5 gives 0.4999 on the export). `mute`: 0/1; a muted track is left out of the mix.
   - `envelopein`, `envelopein2`: fade-in ramp, **linear in amplitude**, from 0 at `envelopein` to full at `envelopein2`, in seconds of the sound file (B05_fades_1s_keyframes: 0 → 0.513542, measured on TVPaint's export within 1 %).
   - `envelopeout`, `envelopeout2`: fade-out ramp, presumably from full at `envelopeout` to 0 at `envelopeout2`. Without a fade both hold the last sample time: (n − 1) / rate for 16-bit WAVs (3.99998 for 4 s), the duration for the 24-bit one (4).
   - `locked`, `coloridx`, `disclosed`, `annotation.count`: interface.
-- **Mix** (TVPaint's movie export, AAC): the sum of the unmuted tracks, each × `volume` × envelope; stereo kept as is (a right channel at half amplitude stays at half). 44.1 kHz mono and 24-bit sources load (A02, A03), their export is not measured yet. Sound starts on frame 0 (the AAC export adds its usual 1024-sample encoder delay).
-- A **clip** exported alone (D02, 2 s clip of a project whose 4 s sound is a project track) has **no audio stream**: project tracks are not exported with a single clip.
+- **Mix** (TVPaint's movie export, AAC): the plain sum of the unmuted tracks (C01: tick × 0.998 + tone × 0.250 for volumes 1 and 0.25), each × `volume` × envelope; stereo kept as is (a right channel at half amplitude stays at half). 44.1 kHz mono and 24-bit sources load (A02, A03), their export is not measured yet. Sound starts on frame 0 (the AAC export adds its usual 1024-sample encoder delay).
+- A **clip** exported alone (D02, each of its two 2 s clips; the 4 s sound is a project track) has **no audio stream**: project tracks are not exported with a clip.
 - `[timelineaudio]` `soundpanelmode` is interface state.
 - George: `tv_SoundClipNew path` / `tv_SoundProjectNew path` add a track; `tv_SoundClipAdjust idx mute volume …` / `tv_SoundProjectAdjust` set mute and volume, but the offset and fades given after them were ignored.
