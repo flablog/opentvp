@@ -13,6 +13,7 @@ Format reverse-engineered on TVPaint Animation 11.7 (Flavio Perez).
 """
 import json
 import math
+import os
 import re
 import struct
 import sys
@@ -375,6 +376,35 @@ def camera_track(points, nframes, profile=None):
             for f in range(nframes)]
 
 
+def _sound(d, start, end, level):
+    """Sound tracks of the project (level 'sound') or of a clip (level 'audio'): INI sections
+    [level] then [level+N]. The audio itself is not in the file: each track gives a path."""
+    def section(name):
+        m = re.compile(rb'\[' + re.escape(name.encode()) + rb'\]\n((?:[^\[\n][^\n]*\n)*)').search(d, start, end)
+        if not m:
+            return None
+        return dict(l.split('=', 1) for l in m.group(1).decode('utf-8', 'replace').splitlines() if '=' in l)
+    head = section(level) or {}
+    tracks = []
+    for n in range(int(float(head.get('trackcount', 0) or 0))):
+        t = section(f'{level}+{n}')
+        if t is None:
+            continue
+        num = lambda k, dflt=0.0: float(t.get(k, dflt) or dflt)
+        path = t.get('filepath', '')
+        tracks.append({
+            'index': n + 1,
+            'file': path,
+            'found': bool(path) and os.path.isfile(path),
+            'offset': num('offset'),
+            'volume': num('volume', 1.0),
+            'mute': t.get('mute') == '1',
+            'fade_in': [num('envelopein'), num('envelopein2')],
+            'fade_out': [num('envelopeout'), num('envelopeout2')],
+        })
+    return {'volume': float(head.get('volume', 1) or 1), 'mute': head.get('mute') == '1', 'tracks': tracks}
+
+
 def _clips(d):
     """Shots, then clips of the project. Fallback: the whole file = one clip."""
     clips = []
@@ -428,6 +458,7 @@ def read_tvpp(path):
             'duration_s': round(frames / fps, 3) if fps else None,
             'visible_frames': visible_frames,
             'camera': cam,
+            'sound': _sound(d, a, b, 'audio'),
             'layers': layers,
         })
     return {
@@ -445,6 +476,7 @@ def read_tvpp(path):
         'output': {'width': int(hdr.get('Camera.Width', 0) or 0),
                    'height': int(hdr.get('Camera.Height', 0) or 0),
                    'fps': float(hdr.get('Camera.FrameRate', 0) or 0) or fps},
+        'sound': _sound(d, 0, len(d), 'sound'),
         'clips': clips,
     }
 
@@ -458,6 +490,24 @@ def _timecode(frames, fps):
     return f"{int(s // 60):02d}:{s % 60:05.2f}"
 
 
+def _print_sound(s, title, indent):
+    """Sound tracks of the project or of a clip (nothing printed without tracks)."""
+    if not s['tracks']:
+        return
+    extra = (', all muted' if s['mute'] else '') + (f", volume {s['volume']:g}" if s['volume'] != 1 else '')
+    print(f"{indent}{title}{len(s['tracks'])} track(s){extra}")
+    for t in s['tracks']:
+        line = f"offset {t['offset']:g} s, volume {t['volume']:g}"
+        if t['mute']:
+            line += ', muted'
+        if t['fade_in'][1] > t['fade_in'][0]:
+            line += f", fade in {t['fade_in'][0]:g}-{t['fade_in'][1]:g} s"
+        if t['fade_out'][1] > t['fade_out'][0]:
+            line += f", fade out {t['fade_out'][0]:g}-{t['fade_out'][1]:g} s"
+        print(f"{indent}  track {t['index']}: {t['file']}{'' if t['found'] else '  (file not found)'}")
+        print(f"{indent}    {line}")
+
+
 def print_report(p):
     print(f"\n{p['file']}")
     print(f"  Resolution   {p['width']} × {p['height']}  (pixel aspect {p['pixel_aspect']:g})")
@@ -468,6 +518,7 @@ def print_report(p):
               f" (duplicated or skipped frames)")
     print(f"  TVPaint      {p['tvpaint']}")
     print(f"  Modified     {p['modified']}  by {p['author']}")
+    _print_sound(p['sound'], 'Sound        project, ', '  ')
     print(f"  Clips        {len(p['clips'])}")
     for c in p['clips']:
         marks = ''
@@ -501,7 +552,8 @@ def print_report(p):
                 arr = cam.get('arrival_frames')
                 when = f"  → reached at frame {arr[k]}" if moving and arr else ''
                 print(f"      point {k}: centre ({q['x']:g}, {q['y']:g})  zoom {q['zoom']:g}  rotation {q['rotation']:g}°{when}")
-        names = {l['index']: l['name'] for l in c['layers']}
+        _print_sound(c['sound'], 'Sound: ', '    ')
+        names ={l['index']: l['name'] for l in c['layers']}
         for l in c['layers']:
             if 'ctg' not in l:
                 continue

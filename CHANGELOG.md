@@ -4,6 +4,9 @@ Versions follow the `VERSION` file; a release is a `vX.Y.Z` tag. Frame numbers h
 
 ## Unreleased
 
+### Added
+- `opentvp info` lists the sound tracks of the project and of each clip: file path (flagged when not found), offset, volume, mute and fades, as text and in the JSON (`sound`). TVPaint does not store the audio in the `.tvpp`, only the path of each file.
+
 ### Changed
 - License: public domain (CC0 1.0) instead of the GPL v3 or later. Releases up to 0.4.0 stay available under the GPL.
 

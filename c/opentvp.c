@@ -240,6 +240,14 @@ typedef struct {
 
 typedef struct { double x, y, rot, zoom; } CamPt;
 
+/* sound: the file holds no audio, only a path per track (docs/FORMAT.md section 8) */
+typedef struct {
+    char *file;
+    int found, mute;
+    double offset, volume, fade_in[2], fade_out[2];
+} SoundTrack;
+typedef struct { double volume; int mute; SoundTrack *t; int n; } Sound;
+
 typedef struct {
     char *name;
     int hidden, mark_in, mark_out;   /* -1 if absent */
@@ -250,6 +258,7 @@ typedef struct {
     double prof[64][2]; int nprof;
     double blur;
     uint8_t bg1[4], bg2[4]; int has_bg;
+    Sound sound;
 } Clip;
 
 typedef struct {
@@ -258,6 +267,7 @@ typedef struct {
     double fps, out_fps;
     int out_w, out_h;
     char *author, *modified;
+    Sound sound;
     Clip *clips; int nclips;
 } Project;
 
@@ -414,6 +424,35 @@ static void read_camera(Clip *c, const uint8_t *a, const uint8_t *b) {
     qsort(c->prof, (size_t)c->nprof, sizeof c->prof[0], cmp_dbl2);
 }
 
+/* level "sound" (project) or "audio" (clip): [level], then [level+N] per track */
+static Sound read_sound(const uint8_t *a, const uint8_t *b, const char *level) {
+    Sound S = {1, 0, NULL, 0};
+    KVList h = read_ini_section(a, (size_t)(b - a), level);
+    S.volume = kv_num(&h, "volume", 1);
+    S.mute = kv_num(&h, "mute", 0) == 1;
+    int n = (int)kv_num(&h, "trackcount", 0);
+    if (n < 0 || n > 1000) n = 0;
+    S.t = xcalloc(sizeof(SoundTrack) * (n ? n : 1));
+    char name[64];
+    for (int i = 0; i < n; i++) {
+        snprintf(name, sizeof name, "%s+%d", level, i);
+        KVList t = read_ini_section(a, (size_t)(b - a), name);
+        if (!t.n) continue;
+        SoundTrack *T = &S.t[S.n++];
+        const char *f = kv_get(&t, "filepath");
+        T->file = strdup(f ? f : "");
+        FILE *fp = T->file[0] ? fopen_u8(T->file, "rb") : NULL;
+        T->found = fp != NULL;
+        if (fp) fclose(fp);
+        T->offset = kv_num(&t, "offset", 0);
+        T->volume = kv_num(&t, "volume", 1);
+        T->mute = kv_num(&t, "mute", 0) == 1;
+        T->fade_in[0] = kv_num(&t, "envelopein", 0); T->fade_in[1] = kv_num(&t, "envelopein2", 0);
+        T->fade_out[0] = kv_num(&t, "envelopeout", 0); T->fade_out[1] = kv_num(&t, "envelopeout2", 0);
+    }
+    return S;
+}
+
 static Project load_project(const char *path) {
     Project P;
     memset(&P, 0, sizeof P);
@@ -431,6 +470,7 @@ static Project load_project(const char *path) {
     P.author = au ? strdup(au) : strdup("");
     P.modified = md ? strdup(md) : strdup("");
     if (P.width <= 0 || P.height <= 0) die("unreadable project header (not a TVPaint 11 .tvpp?)");
+    P.sound = read_sound(d, e, "sound");
 
     const uint8_t *ra[4], *rb[4], *sa[64], *sb[64], *ca[256], *cb[256], *xa[2], *xb[2];
     int nr = find_sections(d, e, SEC_ROOT, ra, rb, 4);
@@ -453,6 +493,7 @@ static Project load_project(const char *path) {
                 c->mark_out = kv_num(&ch, "MarkOut", 0) == 1 ? (int)kv_num(&ch, "MarkOutPosition", 0) : -1;
                 read_layers(c, xa[0], xb[0]);
                 read_camera(c, xa[0], xb[0]);
+                c->sound = read_sound(xa[0], xb[0], "audio");
                 const uint8_t *g1 = memfind(xa[0], (size_t)(xb[0] - xa[0]), "BGP1");
                 const uint8_t *g2 = memfind(xa[0], (size_t)(xb[0] - xa[0]), "BGP2");
                 if (g1 && g2) { memcpy(c->bg1, g1 + 8, 4); memcpy(c->bg2, g2 + 8, 4); c->has_bg = 1; }
@@ -1006,12 +1047,42 @@ static void json_str(FILE *o, const char *s) {
     fputc('"', o);
 }
 
+static void json_sound(const Sound *S) {
+    printf("{\"volume\": %g, \"mute\": %s, \"tracks\": [", S->volume, S->mute ? "true" : "false");
+    for (int i = 0; i < S->n; i++) {
+        const SoundTrack *T = &S->t[i];
+        printf("%s{\"index\": %d, \"file\": ", i ? ", " : "", i + 1); json_str(stdout, T->file);
+        printf(", \"found\": %s, \"offset\": %g, \"volume\": %g, \"mute\": %s, \"fade_in\": [%g, %g], \"fade_out\": [%g, %g]}",
+               T->found ? "true" : "false", T->offset, T->volume, T->mute ? "true" : "false",
+               T->fade_in[0], T->fade_in[1], T->fade_out[0], T->fade_out[1]);
+    }
+    printf("]}");
+}
+
+static void print_sound(const Sound *S, const char *title, const char *ind) {
+    if (!S->n) return;
+    printf("%s%s%d track(s)", ind, title, S->n);
+    if (S->mute) printf(", all muted");
+    if (S->volume != 1) printf(", volume %g", S->volume);
+    printf("\n");
+    for (int i = 0; i < S->n; i++) {
+        const SoundTrack *T = &S->t[i];
+        printf("%s  track %d: %s%s\n", ind, i + 1, T->file, T->found ? "" : "  (file not found)");
+        printf("%s    offset %g s, volume %g", ind, T->offset, T->volume);
+        if (T->mute) printf(", muted");
+        if (T->fade_in[1] > T->fade_in[0]) printf(", fade in %g-%g s", T->fade_in[0], T->fade_in[1]);
+        if (T->fade_out[1] > T->fade_out[0]) printf(", fade out %g-%g s", T->fade_out[0], T->fade_out[1]);
+        printf("\n");
+    }
+}
+
 static int cmd_info(const char *path, int json) {
     Project P = load_project(path);
     if (json) {
         printf("{\n  \"file\": "); json_str(stdout, path);
         printf(",\n  \"width\": %d, \"height\": %d, \"fps\": %g,\n", P.width, P.height, P.fps);
         printf("  \"output\": {\"width\": %d, \"height\": %d, \"fps\": %g},\n", P.out_w, P.out_h, P.out_fps);
+        printf("  \"sound\": "); json_sound(&P.sound); printf(",\n");
         printf("  \"clips\": [\n");
         for (int i = 0; i < P.nclips; i++) {
             Clip *c = &P.clips[i];
@@ -1028,7 +1099,8 @@ static int cmd_info(const char *path, int json) {
                 CamPt cp = camera_at_t(&P, c, N > 1 ? (double)f / (N - 1) : 0);
                 printf("%s[%.3f, %.3f, %.4f, %.5f]", f ? ", " : "", cp.x, cp.y, cp.rot, cp.zoom);
             }
-            printf("]},\n     \"layers\": [\n");
+            printf("]},\n     \"sound\": "); json_sound(&c->sound);
+            printf(",\n     \"layers\": [\n");
             for (int l = 0; l < c->nlayers; l++) {
                 Layer *L = &c->layers[l];
                 printf("       {\"index\": %d, \"name\": ", l + 1); json_str(stdout, L->name);
@@ -1045,7 +1117,9 @@ static int cmd_info(const char *path, int json) {
     printf("%s\n", path);
     printf("  Resolution   %d x %d\n  Output       %d x %d (camera)\n  Frame rate   %g fps", P.width, P.height, P.out_w, P.out_h, P.fps);
     if (fabs(P.out_fps - P.fps) > 1e-3) printf("  (camera %g fps: TVPaint resamples at render)", P.out_fps);
-    printf("\n  Modified     %s by %s\n  Clips        %d\n", P.modified, P.author, P.nclips);
+    printf("\n  Modified     %s by %s\n", P.modified, P.author);
+    print_sound(&P.sound, "Sound        project, ", "  ");
+    printf("  Clips        %d\n", P.nclips);
     for (int i = 0; i < P.nclips; i++) {
         Clip *c = &P.clips[i];
         printf("\n  Clip %d \"%s\"%s — %d frames, visible content %d", i + 1, c->name, c->hidden ? " (hidden)" : "", c->frames, c->visible_frames);
@@ -1066,6 +1140,7 @@ static int cmd_info(const char *path, int json) {
             for (int k = 0; k < c->npts; k++)
                 printf("      point %d: centre (%g, %g) zoom %g rotation %g°\n", k, c->pts[k].x, c->pts[k].y, c->pts[k].zoom, c->pts[k].rot);
         }
+        print_sound(&c->sound, "Sound: ", "    ");
     }
     return 0;
 }

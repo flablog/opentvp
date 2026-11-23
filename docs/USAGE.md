@@ -17,7 +17,7 @@ chmod +x opentvp-macos
 ## Commands
 
 ```
-opentvp info   file.tvpp            readable structure (resolution, fps, clips, layers, camera)
+opentvp info   file.tvpp            readable structure (resolution, fps, clips, layers, camera, sound tracks)
 opentvp info   file.tvpp --json     the same as JSON (+ frame-by-frame camera track)
 opentvp render file.tvpp folder     final composited render, like "Save sequence" through the camera
 opentvp render file.tvpp folder --layers --keyframes    one folder per layer, one image per drawing + exposure JSON
