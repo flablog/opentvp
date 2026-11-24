@@ -16,6 +16,8 @@ Options:
     --sound             also writes the mix of the clip's sound tracks: <prefix>.wav
                         (48 kHz stereo 24-bit, the duration of the frames; see opentvp_sound.py)
     --sound-map OLD=NEW replace the OLD path prefix of the sound files by NEW (repeatable)
+    --ffmpeg PATH       ffmpeg used for sound files other than WAV (MP3, AAC, AIFF, MOV…)
+                        (default: the PATH, then next to opentvp_sound.py)
 
 Layer-by-layer export (see LAYER_EXPORT.md):
     --layers [LIST]     exports each layer to its own folder: all (default,
@@ -685,6 +687,9 @@ def main(argv):
                     help="also write the mix of the clip's sound tracks as a WAV")
     ap.add_argument('--sound-map', action='append', metavar='OLD=NEW',
                     help="replace the OLD path prefix of the sound files by NEW (repeatable)")
+    ap.add_argument('--ffmpeg', metavar='PATH',
+                    help="ffmpeg used for sound files other than WAV (default: the PATH, then next to "
+                         "opentvp_sound.py)")
     g = ap.add_argument_group('per-layer export')
     g.add_argument('--layers', nargs='?', const='all',
                    help="export layers separately: all (default) or a \"name,name,3\" list")
@@ -703,6 +708,8 @@ def main(argv):
     g.add_argument('--json', help="JSON file name (default: <clip>_exposure.json or _layers.json)")
     ap.add_argument('--version', action='version', version='opentvp_render ' + ti.__version__)
     a = ap.parse_args(argv)
+    if a.ffmpeg:
+        ts.set_ffmpeg(a.ffmpeg)
     if a.layers is not None or a.keyframes:
         return export_layers(a)
 

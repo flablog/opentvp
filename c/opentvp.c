@@ -44,7 +44,10 @@ static int mkdir_u8(const char *p) { wchar_t *w = widen(p); int r = _wmkdir(w); 
 #else
 #include <pthread.h>
 #include <unistd.h>
+#include <spawn.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+extern char **environ;
 #define MKDIR(p) mkdir(p, 0755)
 #define fopen_u8 fopen
 #endif
@@ -1515,6 +1518,114 @@ static const char *wav_read(const char *path, Wav *W, char *why, size_t whyn) {
     return NULL;
 }
 
+/* ffmpeg decodes the sound files that are not a WAV we read (MP3, AAC, AIFF, MOV…): --ffmpeg,
+ * otherwise the first one on the PATH, otherwise next to the executable */
+static const char *g_ffmpeg = NULL;
+static int g_ffmpeg_known = 0;
+static const char *g_argv0 = NULL;            /* to find the executable's folder without /proc */
+
+static int is_program(const char *p) {
+#ifdef _WIN32
+    wchar_t *w = widen(p); DWORD a = GetFileAttributesW(w); free(w);
+    return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+#else
+    struct stat st;
+    return !stat(p, &st) && S_ISREG(st.st_mode) && !access(p, X_OK);
+#endif
+}
+
+static const char *find_ffmpeg(void) {
+    if (g_ffmpeg_known) return g_ffmpeg;
+    char exe[4096] = "", *path = NULL;
+#ifdef _WIN32
+    const char *name = "ffmpeg.exe"; char sep = ';';
+    const wchar_t *wp = _wgetenv(L"PATH");
+    if (wp) {
+        int n = WideCharToMultiByte(CP_UTF8, 0, wp, -1, NULL, 0, NULL, NULL);
+        path = xmalloc((size_t)n + 1);
+        WideCharToMultiByte(CP_UTF8, 0, wp, -1, path, n, NULL, NULL);
+    }
+    wchar_t we[2048]; DWORD k = GetModuleFileNameW(NULL, we, 2048);
+    if (k && k < 2048) WideCharToMultiByte(CP_UTF8, 0, we, -1, exe, sizeof exe, NULL, NULL);
+#else
+    const char *name = "ffmpeg"; char sep = ':';
+    if (getenv("PATH")) path = strdup(getenv("PATH"));
+    ssize_t k = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (k > 0) exe[k] = 0;
+    else if (g_argv0 && strchr(g_argv0, '/')) snprintf(exe, sizeof exe, "%s", g_argv0);
+#endif
+    char *e = exe + strlen(exe);                 /* executable -> its folder */
+    while (e > exe && e[-1] != '/' && e[-1] != '\\') e--;
+    *e = 0;
+    const char *found = NULL;
+    char f[4200];
+    for (char *d = path; d && !found; ) {
+        char *end = strchr(d, sep);
+        if (end) *end = 0;
+        char *a = d; size_t n = strlen(a);
+        if (n && a[0] == '"') { a++; n--; }
+        if (n && a[n - 1] == '"') a[--n] = 0;
+        if (n) {
+            snprintf(f, sizeof f, "%s%s%s", a, (a[n - 1] == '/' || a[n - 1] == '\\') ? "" : "/", name);
+            if (is_program(f)) found = strdup(f);
+        }
+        d = end ? end + 1 : NULL;
+    }
+    if (!found && *exe) { snprintf(f, sizeof f, "%s%s", exe, name); if (is_program(f)) found = strdup(f); }
+    free(path);
+    g_ffmpeg = found; g_ffmpeg_known = 1;
+    return g_ffmpeg;
+}
+
+/* first audio stream of any file ffmpeg reads, as wav_read gives it (through a float WAV at the
+ * file's own rate, in the temporary folder); 0 on success */
+static int ffmpeg_decode(const char *exe, const char *src, Wav *W) {
+    static int counter;
+    int id = __sync_fetch_and_add(&counter, 1);
+    char tmp[2200];
+#ifdef _WIN32
+    wchar_t wt[1024]; char t[1600] = ".\\";
+    DWORD k = GetTempPathW(1024, wt);
+    if (k && k < 1024) WideCharToMultiByte(CP_UTF8, 0, wt, -1, t, sizeof t, NULL, NULL);
+    snprintf(tmp, sizeof tmp, "%sopentvp-%lu-%d.wav", t, (unsigned long)GetCurrentProcessId(), id);
+#else
+    const char *t = getenv("TMPDIR");
+    snprintf(tmp, sizeof tmp, "%s/opentvp-%d-%d.wav", t && *t ? t : "/tmp", (int)getpid(), id);
+#endif
+    const char *args[] = {exe, "-nostdin", "-v", "quiet", "-i", src, "-map", "0:a:0",
+                          "-c:a", "pcm_f32le", "-f", "wav", "-y", tmp, NULL};
+    int ok = 0;
+#ifdef _WIN32
+    size_t len = 1;
+    for (int i = 0; args[i]; i++) len += strlen(args[i]) + 3;
+    char *cl = xmalloc(len); cl[0] = 0;
+    for (int i = 0; args[i]; i++) { strcat(cl, i ? " \"" : "\""); strcat(cl, args[i]); strcat(cl, "\""); }
+    wchar_t *wc = widen(cl), *wx = widen(exe);
+    STARTUPINFOW si; PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof si); si.cb = sizeof si;
+    if (CreateProcessW(wx, wc, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        DWORD code = 1;
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+        ok = code == 0;
+    }
+    free(cl); free(wc); free(wx);
+#else
+    pid_t pid; int st;
+    if (!posix_spawn(&pid, exe, NULL, NULL, (char *const *)args, environ) && waitpid(pid, &st, 0) == pid)
+        ok = WIFEXITED(st) && WEXITSTATUS(st) == 0;
+#endif
+    char why[128];
+    int r = ok && !wav_read(tmp, W, why, sizeof why) ? 0 : -1;
+#ifdef _WIN32
+    { wchar_t *w = widen(tmp); _wremove(w); free(w); }
+#else
+    remove(tmp);
+#endif
+    return r;
+}
+
 /* first OLD=NEW prefix that matches (slashes normalised, ASCII case-insensitive) */
 static char *sound_map_path(const char *path) {
     char *p = strdup(path);
@@ -1563,6 +1674,16 @@ static double *sound_mix(const Project *P, const Clip *C, int f0, int f1, long l
         fclose(fp);
         Wav W; char why[128];
         const char *err = wav_read(mp, &W, why, sizeof why);
+        if (err && strcmp(err, "cannot read the file")) {      /* not a WAV we read: ffmpeg, if there is one */
+            const char *ff = find_ffmpeg();
+            if (!ff) { printf("  ⚠ sound track %d: %s (ffmpeg not found), skipped: %s\n", k + 1, err, mp); free(mp); continue; }
+            if (ffmpeg_decode(ff, mp, &W)) {
+                printf("  ⚠ sound track %d: %s, ffmpeg cannot decode it either, skipped: %s\n", k + 1, err, mp);
+                free(W.x); free(mp); continue;
+            }
+            printf("  sound track %d: %s, decoded with ffmpeg\n", k + 1, err);
+            err = NULL;
+        }
         if (err) { printf("  ⚠ sound track %d: %s, skipped: %s\n", k + 1, err, mp); free(mp); continue; }
         /* TVPaint places the sound on a whole 48 kHz sample (B03: +47900.016 -> +47900); with a
            negative offset it cuts one sample too few from the start (B04: -10550.016 -> -10549) */
@@ -1801,7 +1922,9 @@ static void usage(void) {
         "  --prefix NAME       image prefix (default: clip name)\n"
         "  --sound             also write the mix of the clip's sound tracks: <prefix>.wav\n"
         "                      (with --layers: <clip>.wav, named in the JSON)\n"
-        "  --sound-map OLD=NEW replace the OLD path prefix of the sound files by NEW (repeatable)\n\n"
+        "  --sound-map OLD=NEW replace the OLD path prefix of the sound files by NEW (repeatable)\n"
+        "  --ffmpeg PATH       ffmpeg used for sound files other than WAV (MP3, AAC, AIFF, MOV...)\n"
+        "                      (default: the PATH, then next to this executable)\n\n"
         "layer-by-layer export (straight alpha images, whole canvas, + JSON):\n"
         "  --layers [LIST]     all visible layers, or \"name,name,3\" (numbers from opentvp info)\n"
         "  --keyframes         one image per drawing + exposure JSON (otherwise every frame)\n"
@@ -1888,6 +2011,11 @@ static int cmd_render(int argc, char **argv) {
             if (g_nsound_map < 64) { g_sound_map[g_nsound_map][0] = m; g_sound_map[g_nsound_map][1] = eq + 1; g_nsound_map++; }
             continue;
         }
+        if (!strcmp(argv[i], "--ffmpeg") && i + 1 < argc) {
+            g_ffmpeg = argv[++i]; g_ffmpeg_known = 1;
+            if (!is_program(g_ffmpeg)) { fprintf(stderr, "--ffmpeg: file not found: %s\n", g_ffmpeg); return 2; }
+            continue;
+        }
         if (!strcmp(argv[i], "--clip") && i + 1 < argc) clip = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) { if (sscanf(argv[++i], "%d-%d", &f0, &f1) == 1) f1 = f0; }
         else if (!strcmp(argv[i], "--bg") && i + 1 < argc) bgmode = argv[++i];
@@ -1957,6 +2085,7 @@ static void utf8_args(int *argc, char ***argv) {
 #ifndef OPENTVP_NO_MAIN
 int main(int argc, char **argv) {
     utf8_args(&argc, &argv);
+    g_argv0 = argv[0];
     if (argc >= 2 && (!strcmp(argv[1], "--version") || !strcmp(argv[1], "version"))) { printf("opentvp %s\n", OPENTVP_VERSION); return 0; }
     if (argc < 3) { usage(); return 2; }
     if (!strcmp(argv[1], "info")) return cmd_info(argv[2], argc > 3 && !strcmp(argv[3], "--json"));

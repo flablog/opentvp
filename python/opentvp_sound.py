@@ -15,12 +15,16 @@ The mix follows TVPaint's movie export, measured on corpus/data/13_son:
   * the sound starts at offset seconds on the clip timeline, snapped to a whole 48 kHz sample
     (one sample later when the offset is negative);
   * output: 48 kHz, stereo, 24-bit, exactly the duration of the frames (f1 - f0 + 1) / fps.
-Sound files: WAV only (PCM 8, 16, 24, 32 bits or float; mono is played on both channels,
-other rates are resampled linearly). Other formats are reported and skipped.
+Sound files: WAV is read directly (PCM 8, 16, 24, 32 bits or float; mono is played on both
+channels, other rates are resampled linearly). Any other file (MP3, AAC, AIFF, MOV…) is decoded
+by ffmpeg when it is found (--ffmpeg, otherwise the PATH, otherwise next to this script): the first
+audio stream, at its own rate, then the same steps as a WAV. Without ffmpeg it is reported and skipped.
 """
 import os
 import struct
+import subprocess
 import sys
+import tempfile
 
 import numpy as np
 
@@ -80,6 +84,57 @@ def read_wav(path):
     return rate, x[:, :2]
 
 
+_ffmpeg = None           # path of ffmpeg, once looked for
+_ffmpeg_known = False
+
+
+def set_ffmpeg(path):
+    """--ffmpeg PATH: use this ffmpeg instead of looking for one."""
+    global _ffmpeg, _ffmpeg_known
+    if not os.path.isfile(path):
+        raise SystemExit(f"--ffmpeg: file not found: {path}")
+    _ffmpeg, _ffmpeg_known = path, True
+
+
+def find_ffmpeg():
+    """--ffmpeg, otherwise the first one on the PATH, otherwise next to this script; None if none."""
+    global _ffmpeg, _ffmpeg_known
+    if not _ffmpeg_known:
+        _ffmpeg_known = True
+        name = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+        dirs = [d.strip('"') for d in os.environ.get('PATH', '').split(os.pathsep)]
+        dirs.append(os.path.dirname(os.path.abspath(__file__)))
+        for d in dirs:
+            f = os.path.join(d, name)
+            if d and os.path.isfile(f) and (os.name == 'nt' or os.access(f, os.X_OK)):
+                _ffmpeg = f
+                break
+    return _ffmpeg
+
+
+def decode_ffmpeg(exe, path):
+    """First audio stream of any file ffmpeg reads, as read_wav returns it (through a float WAV,
+    at the file's own rate). Raises ValueError if ffmpeg fails."""
+    fd, tmp = tempfile.mkstemp(prefix='opentvp-', suffix='.wav')
+    os.close(fd)
+    try:
+        r = subprocess.run([exe, '-nostdin', '-v', 'quiet', '-i', path, '-map', '0:a:0',
+                            '-c:a', 'pcm_f32le', '-f', 'wav', '-y', tmp],
+                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if r.returncode:
+            raise ValueError('ffmpeg failed')
+        try:
+            return read_wav(tmp)
+        except OSError:
+            raise ValueError('ffmpeg failed')
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
 def map_path(path, mapping):
     """Applies the first OLD=NEW prefix that matches (slashes normalised, case-insensitive)."""
     p = path.replace('\\', '/')
@@ -119,10 +174,19 @@ def mix_clip(clip, fps, f0, f1, mapping=(), log=print):
             log(f"  ⚠ sound track {tr['index']}: file not found, skipped: {path}")
             continue
         try:
-            rate, x = read_wav(path)
-        except ValueError as e:
-            log(f"  ⚠ sound track {tr['index']}: {e}, skipped: {path}")
-            continue
+            try:
+                rate, x = read_wav(path)
+            except ValueError as e:                # not a WAV we read: ffmpeg, if there is one
+                exe = find_ffmpeg()
+                if not exe:
+                    log(f"  ⚠ sound track {tr['index']}: {e} (ffmpeg not found), skipped: {path}")
+                    continue
+                try:
+                    rate, x = decode_ffmpeg(exe, path)
+                except ValueError:
+                    log(f"  ⚠ sound track {tr['index']}: {e}, ffmpeg cannot decode it either, skipped: {path}")
+                    continue
+                log(f"  sound track {tr['index']}: {e}, decoded with ffmpeg")
         except OSError:
             log(f"  ⚠ sound track {tr['index']}: cannot read the file, skipped: {path}")
             continue
@@ -191,7 +255,11 @@ def main(argv):
     ap.add_argument('--frames', help='A-B, from 0 (default: in/out marks, otherwise the whole clip)')
     ap.add_argument('--sound-map', action='append', metavar='OLD=NEW',
                     help='replace the OLD path prefix of the sound files by NEW (repeatable)')
+    ap.add_argument('--ffmpeg', metavar='PATH',
+                    help='ffmpeg used for sound files other than WAV (default: PATH, then next to this script)')
     a = ap.parse_args(argv)
+    if a.ffmpeg:
+        set_ffmpeg(a.ffmpeg)
     info = ti.read_tvpp(a.tvpp)
     if not 1 <= a.clip <= len(info['clips']):
         raise SystemExit(f"clip {a.clip} does not exist (1 to {len(info['clips'])})")

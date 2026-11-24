@@ -2219,7 +2219,8 @@ static void play_usage(void) {
         "  --canvas            whole canvas without the camera framing, outside the camera darkened (key C, per clip)\n"
         "  --scale S           preview resolution for this session (the window menu saves 1 or 0.5; default 0.5)\n"
         "  --blur-samples N    motion blur samples (8)\n"
-        "  --threads N         render threads (default: all cores)\n\n"
+        "  --threads N         render threads (default: all cores)\n"
+        "  --ffmpeg PATH       ffmpeg used for sound files other than WAV (default: the PATH, then next to the player)\n\n"
         "In the player, F1 shows the keyboard shortcuts and Ctrl+I the file information.\n"
         "Drop .tvpp files on the window to replace or extend the timeline.\n";
     fputs(u, stderr);
@@ -2230,6 +2231,7 @@ static void play_usage(void) {
 
 int main(int argc, char **argv) {
     utf8_args(&argc, &argv);
+    g_argv0 = argv[0];
     g_die_hook = player_die;
 #ifdef _WIN32
     if (own_console()) { g_own_console = 1; ShowWindow(GetConsoleWindow(), SW_HIDE); }
@@ -2245,6 +2247,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--scale") && i + 1 < argc) { g_scale = atof(argv[++i]); g_scale_from_cli = 1; }
         else if (!strcmp(argv[i], "--blur-samples") && i + 1 < argc) g_blur_samples = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--threads") && i + 1 < argc) g_threads = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--ffmpeg") && i + 1 < argc) { g_ffmpeg = argv[++i]; g_ffmpeg_known = 1; }
         else if (!strncmp(argv[i], "--", 2)) { fprintf(stderr, "unknown option: %s\n", argv[i]); play_usage(); return 2; }
         else paths[npaths++] = argv[i];
     }
