@@ -3,7 +3,9 @@
 
 1. C and Python write the same WAV, byte for byte, and print the same sound messages.
 2. With ffmpeg available: the WAV matches TVPaint's movie export (<file>.mp4) within the AAC loss.
-3. With ffmpeg available: the sound files re-encoded in other formats (AIFF, FLAC, MOV, MP3), under
+3. --project-sound on D02 (one 4 s project track, two 2 s clips): each clip gets its part of the
+   track, the clips following one another (C = Python, byte for byte).
+4. With ffmpeg available: the sound files re-encoded in other formats (AIFF, FLAC, MOV, MP3), under
    the same names, are decoded through ffmpeg: lossless formats give the same WAV as the sources.
    TVPaint's AAC export starts with a 1023-sample encoder delay; the first 50 ms are skipped
    (encoder transient).
@@ -116,6 +118,34 @@ def check_no_ffmpeg(tmp, tvpp, k):
     return 0 if ok else 1
 
 
+def check_project_sound(tmp):
+    """D02: with --project-sound, clip k plays seconds 2(k-1) to 2k of the project track."""
+    tvpp = os.path.join(DATA, 'D02_project_two_clips.tvpp')
+    src = ts.read_wav(os.path.join(DATA, 'sources_son', 'tick_ref.wav'))[1]
+    fails = 0
+    for k in (1, 2):
+        outs, wavs = {}, {}
+        for impl in ('c', 'python'):
+            d = os.path.join(tmp, f'proj_{k}_{impl}')
+            outs[impl] = run(impl, tvpp, d, '--clip', str(k), '--scale', '0.25', '--sound', '--project-sound',
+                             '--sound-map', MAP)
+            w = glob.glob(os.path.join(d, '*.wav'))
+            wavs[impl] = w[0] if w else None
+        msg = []
+        if not wavs['c'] or not wavs['python'] or open(wavs['c'], 'rb').read() != open(wavs['python'], 'rb').read():
+            msg.append('C and Python WAVs differ')
+        elif sound_lines(outs['c']) != sound_lines(outs['python']):
+            msg.append('C and Python sound messages differ')
+        else:
+            x = ts.read_wav(wavs['c'])[1]
+            seg = src[(k - 1) * 96000:k * 96000]
+            if len(x) != len(seg) or float(np.abs(x - seg).max()) > 1e-6:
+                msg.append('not the expected part of the project track')
+        fails += bool(msg)
+        print(f'{"--project-sound":28s} D02 clip {k}{"":17s} {"OK" if not msg else "FAIL: " + "; ".join(msg)}')
+    return fails
+
+
 def main():
     ffmpeg = shutil.which('ffmpeg') is not None
     fails = n = 0
@@ -159,6 +189,8 @@ def main():
                 status = 'OK' if not msg else 'FAIL: ' + '; '.join(msg)
                 fails += bool(msg)
                 print(f'{name:28s} clip {k}{truth:24s} {status}')
+        print()
+        fails += check_project_sound(tmp)
         if ffmpeg and refs:
             print()
             fails += check_formats(tmp, refs)

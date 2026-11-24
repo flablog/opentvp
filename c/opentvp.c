@@ -1459,6 +1459,7 @@ static int select_layer(const Clip *C, const char *tok) {
 
 #define SND_RATE 48000
 static int g_sound = 0;                       /* --sound */
+static int g_project_sound = 0;               /* --project-sound */
 static const char *g_sound_map[64][2];        /* --sound-map OLD=NEW */
 static int g_nsound_map = 0;
 
@@ -1655,36 +1656,29 @@ static double snd_envelope(double s, const double fin[2], const double fout[2]) 
     return g;
 }
 
-/* mix of the clip's tracks over frames f0..f1 (from 0): n x 2 doubles at SND_RATE; also used by
- * the player. Prints the same messages as the Python (muted clip, missing or unreadable files). */
-static double *sound_mix(const Project *P, const Clip *C, int f0, int f1, long long *pn, int *pmixed) {
-    const Sound *S = &C->sound;
-    long long n = (long long)rint((double)((long long)(f1 - f0 + 1) * SND_RATE) / P->fps);
-    if (n < 0) n = 0;
-    double *out = xcalloc(sizeof(double) * 2 * (size_t)(n ? n : 1));
-    double t0 = (double)f0 / P->fps;
-    int mixed = 0;
-    if (S->mute) printf("  sound: the clip's tracks are all muted\n");
-    else for (int k = 0; k < S->n; k++) {
+/* adds the unmuted tracks of S (a clip's or the project's sound) to out (n x 2), t0 being the time
+ * of the first sample on that timeline; label names the tracks in the messages (same as the Python) */
+static void add_tracks(double *out, long long n, double t0, const Sound *S, const char *label) {
+    for (int k = 0; k < S->n; k++) {
         const SoundTrack *T = &S->t[k];
         if (T->mute) continue;
         char *mp = sound_map_path(T->file);
         FILE *fp = fopen_u8(mp, "rb");
-        if (!fp) { printf("  ⚠ sound track %d: file not found, skipped: %s\n", k + 1, mp); free(mp); continue; }
+        if (!fp) { printf("  ⚠ %s %d: file not found, skipped: %s\n", label, k + 1, mp); free(mp); continue; }
         fclose(fp);
         Wav W; char why[128];
         const char *err = wav_read(mp, &W, why, sizeof why);
         if (err && strcmp(err, "cannot read the file")) {      /* not a WAV we read: ffmpeg, if there is one */
             const char *ff = find_ffmpeg();
-            if (!ff) { printf("  ⚠ sound track %d: %s (ffmpeg not found), skipped: %s\n", k + 1, err, mp); free(mp); continue; }
+            if (!ff) { printf("  ⚠ %s %d: %s (ffmpeg not found), skipped: %s\n", label, k + 1, err, mp); free(mp); continue; }
             if (ffmpeg_decode(ff, mp, &W)) {
-                printf("  ⚠ sound track %d: %s, ffmpeg cannot decode it either, skipped: %s\n", k + 1, err, mp);
+                printf("  ⚠ %s %d: %s, ffmpeg cannot decode it either, skipped: %s\n", label, k + 1, err, mp);
                 free(W.x); free(mp); continue;
             }
-            printf("  sound track %d: %s, decoded with ffmpeg\n", k + 1, err);
+            printf("  %s %d: %s, decoded with ffmpeg\n", label, k + 1, err);
             err = NULL;
         }
-        if (err) { printf("  ⚠ sound track %d: %s, skipped: %s\n", k + 1, err, mp); free(mp); continue; }
+        if (err) { printf("  ⚠ %s %d: %s, skipped: %s\n", label, k + 1, err, mp); free(mp); continue; }
         /* TVPaint places the sound on a whole 48 kHz sample (B03: +47900.016 -> +47900); with a
            negative offset it cuts one sample too few from the start (B04: -10550.016 -> -10549) */
         double ks = rint(T->offset * SND_RATE);
@@ -1706,18 +1700,47 @@ static double *sound_mix(const Project *P, const Clip *C, int f0, int f1, long l
         }
         free(W.x); free(mp);
     }
+}
+
+/* first frame of the clip on the project timeline: the clips one after the other, in order (hidden
+ * ones included). Not checked against a TVPaint project export yet. */
+static int clip_start(const Project *P, const Clip *C) {
+    int s = 0;
+    for (const Clip *c = P->clips; c < C; c++) s += c->frames;
+    return s;
+}
+
+/* mix of the clip's tracks over frames f0..f1 (from 0): n x 2 doubles at SND_RATE; with project,
+ * the project's tracks too (the clip starting at clip_start). Also used by the player. Prints the
+ * same messages as the Python (muted tracks, missing or unreadable files). */
+static double *sound_mix(const Project *P, const Clip *C, int f0, int f1, int project, long long *pn, int *pmixed) {
+    const Sound *S = &C->sound;
+    long long n = (long long)rint((double)((long long)(f1 - f0 + 1) * SND_RATE) / P->fps);
+    if (n < 0) n = 0;
+    double *out = xcalloc(sizeof(double) * 2 * (size_t)(n ? n : 1));
+    int mixed = 0;
+    if (S->mute) printf("  sound: the clip's tracks are all muted\n");
+    else add_tracks(out, n, (double)f0 / P->fps, S, "sound track");
+    if (project && P->sound.n) {
+        if (P->sound.mute) printf("  sound: the project's tracks are all muted\n");
+        else add_tracks(out, n, (double)(clip_start(P, C) + f0) / P->fps, &P->sound, "project sound track");
+    }
     for (int k = 0; k < S->n; k++) if (!S->t[k].mute) mixed++;
+    if (project) for (int k = 0; k < P->sound.n; k++) if (!P->sound.t[k].mute) mixed++;
     *pn = n; *pmixed = mixed;
     return out;
 }
 
-/* writes the clip's mix (frames f0..f1, from 0) to path; returns 0 (nothing written) without tracks */
-static int export_sound(const Project *P, const Clip *C, int f0, int f1, const char *path) {
-    if (P->sound.n)
-        printf("  sound: %d project track(s) left out (TVPaint does not export them with a clip)\n", P->sound.n);
-    if (!C->sound.n) { printf("  sound: the clip has no sound track, no WAV written\n"); return 0; }
+/* writes the clip's mix (frames f0..f1, from 0) to path; returns 0 (nothing written) without tracks.
+ * project: also the project's tracks, which TVPaint leaves out of a clip's export. */
+static int export_sound(const Project *P, const Clip *C, int f0, int f1, int project, const char *path) {
+    if (P->sound.n && !project)
+        printf("  sound: %d project track(s) left out (TVPaint does not export them with a clip; --project-sound includes them)\n", P->sound.n);
+    if (!C->sound.n && !(project && P->sound.n)) { printf("  sound: the clip has no sound track, no WAV written\n"); return 0; }
+    if (project && P->sound.n)
+        printf("  sound: %d project track(s) included (the clip starts at frame %d of the project)\n", P->sound.n, clip_start(P, C));
     long long n; int mixed;
-    double *out = sound_mix(P, C, f0, f1, &n, &mixed);
+    double *out = sound_mix(P, C, f0, f1, project, &n, &mixed);
     /* 48 kHz stereo 24-bit PCM, clipped to [-1, 1] */
     size_t dn = (size_t)n * 6;
     uint8_t *b = xmalloc(44 + dn);
@@ -1826,7 +1849,7 @@ static int export_layers(LayerOpts *o) {
     if (g_sound) {
         snprintf(wname, sizeof wname, "%s.wav", cname);
         snprintf(jpath, sizeof jpath, "%s/%s", o->outdir, wname);
-        has_wav = export_sound(&P, C, o->f0, o->f1, jpath);
+        has_wav = export_sound(&P, C, o->f0, o->f1, g_project_sound, jpath);
     }
     /* JSON */
     if (o->json) snprintf(jpath, sizeof jpath, "%s/%s", o->outdir, o->json);
@@ -1923,6 +1946,8 @@ static void usage(void) {
         "  --sound             also write the mix of the clip's sound tracks: <prefix>.wav\n"
         "                      (with --layers: <clip>.wav, named in the JSON)\n"
         "  --sound-map OLD=NEW replace the OLD path prefix of the sound files by NEW (repeatable)\n"
+        "  --project-sound     with --sound: also mix the project's sound tracks (TVPaint leaves them\n"
+        "                      out of a clip's export; the clips follow one another)\n"
         "  --ffmpeg PATH       ffmpeg used for sound files other than WAV (MP3, AAC, AIFF, MOV...)\n"
         "                      (default: the PATH, then next to this executable)\n\n"
         "layer-by-layer export (straight alpha images, whole canvas, + JSON):\n"
@@ -2004,6 +2029,7 @@ static int cmd_render(int argc, char **argv) {
         if (!strcmp(argv[i], "--png-level") && i + 1 < argc) { png_level = atoi(argv[++i]); continue; }
         if (!strcmp(argv[i], "--json") && i + 1 < argc) { lo.json = argv[++i]; continue; }
         if (!strcmp(argv[i], "--sound")) { g_sound = 1; continue; }
+        if (!strcmp(argv[i], "--project-sound")) { g_project_sound = 1; continue; }
         if (!strcmp(argv[i], "--sound-map") && i + 1 < argc) {
             char *m = strdup(argv[++i]), *eq = strchr(m, '=');
             if (!eq) { fprintf(stderr, "--sound-map expects OLD=NEW, got: %s\n", m); return 2; }
@@ -2058,7 +2084,7 @@ static int cmd_render(int argc, char **argv) {
     printf("\n%d images in %ld s\n", f1 - f0 + 1, (long)(time(NULL) - w_start));
     if (g_sound) {
         snprintf(fn, sizeof fn, "%s/%s.wav", outdir, pre);
-        export_sound(&P, C, f0, f1, fn);
+        export_sound(&P, C, f0, f1, g_project_sound, fn);
     }
     return 0;
 }

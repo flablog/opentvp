@@ -157,21 +157,16 @@ def envelope(s, fade_in, fade_out):
     return g
 
 
-def mix_clip(clip, fps, f0, f1, mapping=(), log=print):
-    """Mix of the clip's tracks over frames f0..f1 (from 0): float64 array samples × 2."""
-    n = int(round((f1 - f0 + 1) * OUT_RATE / fps))
-    t = f0 / fps + np.arange(n, dtype=np.float64) / OUT_RATE
-    out = np.zeros((n, 2))
-    snd = clip['sound']
-    if snd['mute']:
-        log("  sound: the clip's tracks are all muted")
-        return out
+def add_tracks(out, t, snd, label, mapping, log):
+    """Adds the unmuted tracks of snd (a clip's or the project's sound) to out, t being the time of
+    each output sample on that timeline. label names the tracks in the messages."""
     for tr in snd['tracks']:
         if tr['mute']:
             continue
+        who = f"{label} {tr['index']}"
         path = map_path(tr['file'], mapping)
         if not os.path.isfile(path):
-            log(f"  ⚠ sound track {tr['index']}: file not found, skipped: {path}")
+            log(f"  ⚠ {who}: file not found, skipped: {path}")
             continue
         try:
             try:
@@ -179,16 +174,16 @@ def mix_clip(clip, fps, f0, f1, mapping=(), log=print):
             except ValueError as e:                # not a WAV we read: ffmpeg, if there is one
                 exe = find_ffmpeg()
                 if not exe:
-                    log(f"  ⚠ sound track {tr['index']}: {e} (ffmpeg not found), skipped: {path}")
+                    log(f"  ⚠ {who}: {e} (ffmpeg not found), skipped: {path}")
                     continue
                 try:
                     rate, x = decode_ffmpeg(exe, path)
                 except ValueError:
-                    log(f"  ⚠ sound track {tr['index']}: {e}, ffmpeg cannot decode it either, skipped: {path}")
+                    log(f"  ⚠ {who}: {e}, ffmpeg cannot decode it either, skipped: {path}")
                     continue
-                log(f"  sound track {tr['index']}: {e}, decoded with ffmpeg")
+                log(f"  {who}: {e}, decoded with ffmpeg")
         except OSError:
-            log(f"  ⚠ sound track {tr['index']}: cannot read the file, skipped: {path}")
+            log(f"  ⚠ {who}: cannot read the file, skipped: {path}")
             continue
         # TVPaint places the sound on a whole 48 kHz sample (B03: +47900.016 -> +47900); with a
         # negative offset it cuts one sample too few from the start (B04: -10550.016 -> -10549)
@@ -206,6 +201,30 @@ def mix_clip(clip, fps, f0, f1, mapping=(), log=print):
         v = lo * (1 - a) + hi * a
         gain = tr['volume'] * snd['volume'] * envelope(s, tr['fade_in'], tr['fade_out'])
         out += v * gain[:, None]
+
+
+def clip_start(info, clip):
+    """First frame of the clip on the project timeline: the clips one after the other, in order
+    (hidden ones included). Not checked against a TVPaint project export yet."""
+    return sum(c['frames'] for c in info['clips'][:clip['index'] - 1])
+
+
+def mix_clip(clip, fps, f0, f1, mapping=(), log=print, project=None, start=0):
+    """Mix of the clip's tracks over frames f0..f1 (from 0): float64 array samples × 2. With project
+    (the project's sound), its tracks are added too, the clip starting at frame start of the project."""
+    n = int(round((f1 - f0 + 1) * OUT_RATE / fps))
+    i = np.arange(n, dtype=np.float64) / OUT_RATE
+    out = np.zeros((n, 2))
+    snd = clip['sound']
+    if snd['mute']:
+        log("  sound: the clip's tracks are all muted")
+    else:
+        add_tracks(out, f0 / fps + i, snd, 'sound track', mapping, log)
+    if project is not None and project['tracks']:
+        if project['mute']:
+            log("  sound: the project's tracks are all muted")
+        else:
+            add_tracks(out, (start + f0) / fps + i, project, 'project sound track', mapping, log)
     return out
 
 
@@ -222,17 +241,25 @@ def write_wav(path, x):
         f.write(data)
 
 
-def export_sound(info, clip, f0, f1, path, mapping=(), log=print):
-    """Writes the clip's mix to path. Returns False (and writes nothing) if the clip has no track."""
-    if info['sound']['tracks']:
-        log(f"  sound: {len(info['sound']['tracks'])} project track(s) left out (TVPaint does not "
-            f"export them with a clip)")
-    if not clip['sound']['tracks']:
+def export_sound(info, clip, f0, f1, path, mapping=(), log=print, project=False):
+    """Writes the clip's mix to path. Returns False (and writes nothing) without any track to mix.
+    project: also mix the project's tracks (TVPaint leaves them out of a clip's export)."""
+    proj = info['sound']
+    if proj['tracks'] and not project:
+        log(f"  sound: {len(proj['tracks'])} project track(s) left out (TVPaint does not "
+            f"export them with a clip; --project-sound includes them)")
+    if not clip['sound']['tracks'] and not (project and proj['tracks']):
         log("  sound: the clip has no sound track, no WAV written")
         return False
-    write_wav(path, mix_clip(clip, info['fps'], f0, f1, mapping, log))
-    log(f"  sound: {os.path.basename(path)} ({(f1 - f0 + 1) / info['fps']:.3f} s, "
-        f"{sum(1 for t in clip['sound']['tracks'] if not t['mute'])} track(s) mixed)")
+    start = clip_start(info, clip)
+    if project and proj['tracks']:
+        log(f"  sound: {len(proj['tracks'])} project track(s) included (the clip starts at frame "
+            f"{start} of the project)")
+    write_wav(path, mix_clip(clip, info['fps'], f0, f1, mapping, log, proj if project else None, start))
+    mixed = sum(1 for t in clip['sound']['tracks'] if not t['mute'])
+    if project:
+        mixed += sum(1 for t in proj['tracks'] if not t['mute'])
+    log(f"  sound: {os.path.basename(path)} ({(f1 - f0 + 1) / info['fps']:.3f} s, {mixed} track(s) mixed)")
     return True
 
 
@@ -257,6 +284,8 @@ def main(argv):
                     help='replace the OLD path prefix of the sound files by NEW (repeatable)')
     ap.add_argument('--ffmpeg', metavar='PATH',
                     help='ffmpeg used for sound files other than WAV (default: PATH, then next to this script)')
+    ap.add_argument('--project-sound', action='store_true',
+                    help="also mix the project's sound tracks (the clips one after the other)")
     a = ap.parse_args(argv)
     if a.ffmpeg:
         set_ffmpeg(a.ffmpeg)
@@ -266,7 +295,7 @@ def main(argv):
     c = info['clips'][a.clip - 1]
     f0, f1 = clip_range(c, a.frames)
     print(f"{a.tvpp} — clip \"{c['name']}\" — frames {f0} to {f1}")
-    return 0 if export_sound(info, c, f0, f1, a.wav, parse_map(a.sound_map)) else 1
+    return 0 if export_sound(info, c, f0, f1, a.wav, parse_map(a.sound_map), project=a.project_sound) else 1
 
 
 def clip_range(c, frames):

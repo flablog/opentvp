@@ -1097,15 +1097,16 @@ static const char *base_name(const char *p) {
     return b;
 }
 
-/* the clip's sound, mixed once when the file is opened (frames f0..f1, as `render --sound`);
- * project tracks are left out, as in TVPaint's clip export */
+/* the clip's sound, mixed once when the file is opened (frames f0..f1, as `render --sound
+ * --project-sound`): its own tracks and the project's, as TVPaint plays the project */
 static void section_sound(Section *s) {
-    const Sound *S = &s->C->sound;
+    const Sound *S = &s->C->sound, *PS = &s->F->P.sound;
     int any = 0;
-    for (int k = 0; k < S->n; k++) any |= !S->t[k].mute;
-    if (!any || S->mute) return;
+    if (!S->mute) for (int k = 0; k < S->n; k++) any |= !S->t[k].mute;
+    if (!PS->mute) for (int k = 0; k < PS->n; k++) any |= !PS->t[k].mute;
+    if (!any) return;
     long long n; int mixed;
-    double *d = sound_mix(&s->F->P, s->C, s->f0, s->f1, &n, &mixed);
+    double *d = sound_mix(&s->F->P, s->C, s->f0, s->f1, 1, &n, &mixed);
     int silent = 1;
     for (long long i = 0; i < 2 * n && silent; i++) silent = d[i] == 0;
     if (!silent) {                       /* all silent (files not found, unreadable): no sound kept */
@@ -1531,15 +1532,16 @@ static void draw_info(void) {
     }
     if (unsup) { L[n].colour = COL_WAIT; ROW("Warning", fmt("%d layer(s) with a blending mode played as Color", unsup)); }
     {
-        const Sound *S = &C->sound;
+        const Sound *S = &C->sound, *PS = &P->sound;   /* the clip's tracks, then the project's */
         int missing = 0, muted = 0;
         for (int k = 0; k < S->n; k++) { muted += S->t[k].mute; missing += !S->t[k].mute && !S->t[k].found; }
-        const char *state = !S->n ? "" : (cs->mix ? (g_snd_on ? (g_snd_dev < 0 ? ", no sound output" : ", played") : ", off (M)")
-                                                  : ", silent");
-        if (!S->n) ROW("Sound", "no track");
-        else ROW("Sound", fmt("%d track(s)%s%s%s", S->n, muted ? fmt(", %d muted", muted) : "",
+        for (int k = 0; k < PS->n; k++) { muted += PS->t[k].mute; missing += !PS->t[k].mute && !PS->t[k].found; }
+        const char *state = cs->mix ? (g_snd_on ? (g_snd_dev < 0 ? ", no sound output" : ", played") : ", off (M)") : ", silent";
+        if (!S->n && !PS->n) ROW("Sound", "no track");
+        else ROW("Sound", fmt("%s%s%s%s%s%s", S->n ? fmt("%d track(s)", S->n) : "", S->n && PS->n ? " + " : "",
+                              PS->n ? fmt("%d project track(s)", PS->n) : "", muted ? fmt(", %d muted", muted) : "",
                               missing ? fmt(", %d file(s) not found", missing) : "", state));
-        if (P->sound.n) { L[n].colour = COL_DIM; ROW("", fmt("%d project track(s) not played (TVPaint does not export them with a clip)", P->sound.n)); }
+        if (PS->n) { L[n].colour = COL_DIM; ROW("", fmt("project tracks: the clip starts at frame %d of the project", clip_start(P, C))); }
     }
     L[n++].cell[0] = "";
     L[n].colour = COL_DIM; L[n++].cell[0] = "Frames counted from 0, as in the project settings (the TVPaint timeline shows +1).";

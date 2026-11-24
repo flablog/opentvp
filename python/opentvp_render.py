@@ -16,6 +16,8 @@ Options:
     --sound             also writes the mix of the clip's sound tracks: <prefix>.wav
                         (48 kHz stereo 24-bit, the duration of the frames; see opentvp_sound.py)
     --sound-map OLD=NEW replace the OLD path prefix of the sound files by NEW (repeatable)
+    --project-sound     with --sound: also mix the project's sound tracks (TVPaint leaves
+                        them out of a clip's export; the clips follow one another)
     --ffmpeg PATH       ffmpeg used for sound files other than WAV (MP3, AAC, AIFF, MOV…)
                         (default: the PATH, then next to opentvp_sound.py)
 
@@ -661,7 +663,8 @@ def export_layers(a):
 
     if a.sound:
         wname = safe_name(clip['name']) + '.wav'
-        if ts.export_sound(info, clip, f0, f1, os.path.join(a.out, wname), ts.parse_map(a.sound_map)):
+        if ts.export_sound(info, clip, f0, f1, os.path.join(a.out, wname), ts.parse_map(a.sound_map),
+                           project=a.project_sound):
             doc['sound'] = {'file': wname, 'start_frame': f0, 'rate': ts.OUT_RATE}
 
     jname = a.json or f"{safe_name(clip['name'])}_{'exposure' if a.keyframes else 'layers'}.json"
@@ -687,6 +690,9 @@ def main(argv):
                     help="also write the mix of the clip's sound tracks as a WAV")
     ap.add_argument('--sound-map', action='append', metavar='OLD=NEW',
                     help="replace the OLD path prefix of the sound files by NEW (repeatable)")
+    ap.add_argument('--project-sound', action='store_true',
+                    help="with --sound: also mix the project's sound tracks (TVPaint leaves them out of a "
+                         "clip's export); the clips are placed one after the other")
     ap.add_argument('--ffmpeg', metavar='PATH',
                     help="ffmpeg used for sound files other than WAV (default: the PATH, then next to "
                          "opentvp_sound.py)")
@@ -735,7 +741,8 @@ def main(argv):
         print(f"  frame {f}", end='\r', flush=True)
     print(f"\n{f1 - f0 + 1} images in {time.time() - t_start:.1f} s")
     if a.sound:
-        ts.export_sound(r.info, c, f0, f1, os.path.join(a.out, prefix + '.wav'), ts.parse_map(a.sound_map))
+        ts.export_sound(r.info, c, f0, f1, os.path.join(a.out, prefix + '.wav'), ts.parse_map(a.sound_map),
+                        project=a.project_sound)
     return 0
 
 
