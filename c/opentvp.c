@@ -452,7 +452,8 @@ static Sound read_sound(const uint8_t *a, const uint8_t *b, const char *level) {
         T->volume = kv_num(&t, "volume", 1);
         T->mute = kv_num(&t, "mute", 0) == 1;
         T->fade_in[0] = kv_num(&t, "envelopein", 0); T->fade_in[1] = kv_num(&t, "envelopein2", 0);
-        T->fade_out[0] = kv_num(&t, "envelopeout", 0); T->fade_out[1] = kv_num(&t, "envelopeout2", 0);
+        /* fade-out: full at envelopeout2, silent at envelopeout (B05_fades_1s_keyframes) */
+        T->fade_out[0] = kv_num(&t, "envelopeout2", 0); T->fade_out[1] = kv_num(&t, "envelopeout", 0);
     }
     return S;
 }

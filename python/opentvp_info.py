@@ -400,7 +400,8 @@ def _sound(d, start, end, level):
             'volume': num('volume', 1.0),
             'mute': t.get('mute') == '1',
             'fade_in': [num('envelopein'), num('envelopein2')],
-            'fade_out': [num('envelopeout'), num('envelopeout2')],
+            # fade-out: full at envelopeout2, silent at envelopeout (B05_fades_1s_keyframes)
+            'fade_out': [num('envelopeout2'), num('envelopeout')],
         })
     return {'volume': float(head.get('volume', 1) or 1), 'mute': head.get('mute') == '1', 'tracks': tracks}
 
