@@ -2,7 +2,7 @@
 
 Versions follow the `VERSION` file; a release is a `vX.Y.Z` tag. Frame numbers here count from 0, like the project settings (the TVPaint timeline shows +1).
 
-## Unreleased
+## 0.5.0 — 2026-11-24
 
 ### Added
 - `opentvp info` lists the sound tracks of the project and of each clip: file path (flagged when not found), offset, volume, mute and fades, as text and in the JSON (`sound`). TVPaint does not store the audio in the `.tvpp`, only the path of each file.
