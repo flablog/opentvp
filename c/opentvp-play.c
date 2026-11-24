@@ -1103,10 +1103,11 @@ static void section_sound(Section *s) {
     const Sound *S = &s->C->sound, *PS = &s->F->P.sound;
     int any = 0;
     if (!S->mute) for (int k = 0; k < S->n; k++) any |= !S->t[k].mute;
-    if (!PS->mute) for (int k = 0; k < PS->n; k++) any |= !PS->t[k].mute;
+    int project = !s->C->hidden;           /* a hidden clip is not on the project timeline */
+    if (project && !PS->mute) for (int k = 0; k < PS->n; k++) any |= !PS->t[k].mute;
     if (!any) return;
     long long n; int mixed;
-    double *d = sound_mix(&s->F->P, s->C, s->f0, s->f1, 1, &n, &mixed);
+    double *d = sound_mix(&s->F->P, s->C, s->f0, s->f1, project, &n, &mixed);
     int silent = 1;
     for (long long i = 0; i < 2 * n && silent; i++) silent = d[i] == 0;
     if (!silent) {                       /* all silent (files not found, unreadable): no sound kept */
@@ -1541,7 +1542,8 @@ static void draw_info(void) {
         else ROW("Sound", fmt("%s%s%s%s%s%s", S->n ? fmt("%d track(s)", S->n) : "", S->n && PS->n ? " + " : "",
                               PS->n ? fmt("%d project track(s)", PS->n) : "", muted ? fmt(", %d muted", muted) : "",
                               missing ? fmt(", %d file(s) not found", missing) : "", state));
-        if (PS->n) { L[n].colour = COL_DIM; ROW("", fmt("project tracks: the clip starts at frame %d of the project", clip_start(P, C))); }
+        if (PS->n) { L[n].colour = COL_DIM; ROW("", C->hidden ? "project tracks not played: the clip is hidden, so not on the project timeline"
+                                                   : fmt("project tracks: the clip starts at frame %d of the project", clip_start(P, C))); }
     }
     L[n++].cell[0] = "";
     L[n].colour = COL_DIM; L[n++].cell[0] = "Frames counted from 0, as in the project settings (the TVPaint timeline shows +1).";

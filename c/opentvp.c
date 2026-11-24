@@ -1702,11 +1702,11 @@ static void add_tracks(double *out, long long n, double t0, const Sound *S, cons
     }
 }
 
-/* first frame of the clip on the project timeline: the clips one after the other, in order (hidden
- * ones included). Not checked against a TVPaint project export yet. */
+/* first frame of the clip on the project timeline: the clips one after the other, in order, hidden
+ * ones left out (TVPaint's project export, D02C / D02D) */
 static int clip_start(const Project *P, const Clip *C) {
     int s = 0;
-    for (const Clip *c = P->clips; c < C; c++) s += c->frames;
+    for (const Clip *c = P->clips; c < C; c++) if (!c->hidden) s += c->frames;
     return s;
 }
 
@@ -1734,7 +1734,10 @@ static double *sound_mix(const Project *P, const Clip *C, int f0, int f1, int pr
 /* writes the clip's mix (frames f0..f1, from 0) to path; returns 0 (nothing written) without tracks.
  * project: also the project's tracks, which TVPaint leaves out of a clip's export. */
 static int export_sound(const Project *P, const Clip *C, int f0, int f1, int project, const char *path) {
-    if (P->sound.n && !project)
+    if (project && P->sound.n && C->hidden) {
+        printf("  sound: the clip is hidden in TVPaint, so not on the project timeline: project tracks left out\n");
+        project = 0;
+    } else if (P->sound.n && !project)
         printf("  sound: %d project track(s) left out (TVPaint does not export them with a clip; --project-sound includes them)\n", P->sound.n);
     if (!C->sound.n && !(project && P->sound.n)) { printf("  sound: the clip has no sound track, no WAV written\n"); return 0; }
     if (project && P->sound.n)
@@ -1947,7 +1950,7 @@ static void usage(void) {
         "                      (with --layers: <clip>.wav, named in the JSON)\n"
         "  --sound-map OLD=NEW replace the OLD path prefix of the sound files by NEW (repeatable)\n"
         "  --project-sound     with --sound: also mix the project's sound tracks (TVPaint leaves them\n"
-        "                      out of a clip's export; the clips follow one another)\n"
+        "                      out of a clip's export; the visible clips follow one another)\n"
         "  --ffmpeg PATH       ffmpeg used for sound files other than WAV (MP3, AAC, AIFF, MOV...)\n"
         "                      (default: the PATH, then next to this executable)\n\n"
         "layer-by-layer export (straight alpha images, whole canvas, + JSON):\n"

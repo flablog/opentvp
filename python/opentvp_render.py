@@ -17,7 +17,7 @@ Options:
                         (48 kHz stereo 24-bit, the duration of the frames; see opentvp_sound.py)
     --sound-map OLD=NEW replace the OLD path prefix of the sound files by NEW (repeatable)
     --project-sound     with --sound: also mix the project's sound tracks (TVPaint leaves
-                        them out of a clip's export; the clips follow one another)
+                        them out of a clip's export; the visible clips follow one another)
     --ffmpeg PATH       ffmpeg used for sound files other than WAV (MP3, AAC, AIFF, MOV…)
                         (default: the PATH, then next to opentvp_sound.py)
 
@@ -692,7 +692,7 @@ def main(argv):
                     help="replace the OLD path prefix of the sound files by NEW (repeatable)")
     ap.add_argument('--project-sound', action='store_true',
                     help="with --sound: also mix the project's sound tracks (TVPaint leaves them out of a "
-                         "clip's export); the clips are placed one after the other")
+                         "clip's export); the visible clips are placed one after the other")
     ap.add_argument('--ffmpeg', metavar='PATH',
                     help="ffmpeg used for sound files other than WAV (default: the PATH, then next to "
                          "opentvp_sound.py)")

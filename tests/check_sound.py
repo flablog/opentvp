@@ -4,7 +4,9 @@
 1. C and Python write the same WAV, byte for byte, and print the same sound messages.
 2. With ffmpeg available: the WAV matches TVPaint's movie export (<file>.mp4) within the AAC loss.
 3. --project-sound on D02 (one 4 s project track, two 2 s clips): each clip gets its part of the
-   track, the clips following one another (C = Python, byte for byte).
+   track, the clips following one another (C = Python, byte for byte). D02C / D02D: TVPaint's
+   project export (three clips, the first one hidden in D02D) matches the clips' WAVs one after
+   the other, hidden clips left out.
 4. With ffmpeg available: the sound files re-encoded in other formats (AIFF, FLAC, MOV, MP3), under
    the same names, are decoded through ffmpeg: lossless formats give the same WAV as the sources.
    TVPaint's AAC export starts with a 1023-sample encoder delay; the first 50 ms are skipped
@@ -146,6 +148,49 @@ def check_project_sound(tmp):
     return fails
 
 
+def check_project_export(tmp):
+    """TVPaint's project export (D02C: three clips; D02D: the same, first clip hidden): the clips'
+    --project-sound WAVs, visible clips one after the other, match the export's sound."""
+    fails = 0
+    for name in ('D02C_project_three_clips', 'D02D_project_first_hidden'):
+        tvpp = os.path.join(DATA, name + '.tvpp')
+        parts, msg = [], []
+        for c in ti.read_tvpp(tvpp)['clips']:
+            k = c['index']
+            outs, wavs = {}, {}
+            for impl in ('c', 'python'):
+                d = os.path.join(tmp, f'{name}_{k}_{impl}')
+                outs[impl] = run(impl, tvpp, d, '--clip', str(k), '--scale', '0.25', '--sound', '--project-sound',
+                                 '--sound-map', MAP)
+                w = glob.glob(os.path.join(d, '*.wav'))
+                wavs[impl] = open(w[0], 'rb').read() if w else None
+            if wavs['c'] != wavs['python']:
+                msg.append(f'clip {k}: C and Python WAVs differ')
+            if sound_lines(outs['c']) != sound_lines(outs['python']):
+                msg.append(f'clip {k}: C and Python sound messages differ')
+            if c['hidden']:
+                if wavs['c'] is not None:
+                    msg.append(f'clip {k} is hidden but got the project track')
+            elif wavs['c'] is None:
+                msg.append(f'clip {k}: no WAV')
+            else:
+                parts.append(ts.read_wav(glob.glob(os.path.join(tmp, f'{name}_{k}_c', '*.wav'))[0])[1])
+        truth = ''
+        if not msg and parts and shutil.which('ffmpeg'):
+            e = export_audio(os.path.join(DATA, name + '.mp4'))
+            m = np.vstack(parts)
+            if e is not None:
+                e = e[AAC_DELAY:]
+                L = min(len(m), len(e))
+                rms = float(np.sqrt(((m[2400:L] - e[2400:L]) ** 2).mean()))
+                truth = f'  vs TVPaint: rms {rms:.5f}'
+                if rms > MAX_RMS:
+                    msg.append(f'differs from the TVPaint export (rms {rms:.5f} > {MAX_RMS})')
+        fails += bool(msg)
+        print(f'{name:28s} project{truth:24s} {"OK" if not msg else "FAIL: " + "; ".join(msg)}')
+    return fails
+
+
 def main():
     ffmpeg = shutil.which('ffmpeg') is not None
     fails = n = 0
@@ -191,6 +236,7 @@ def main():
                 print(f'{name:28s} clip {k}{truth:24s} {status}')
         print()
         fails += check_project_sound(tmp)
+        fails += check_project_export(tmp)
         if ffmpeg and refs:
             print()
             fails += check_formats(tmp, refs)

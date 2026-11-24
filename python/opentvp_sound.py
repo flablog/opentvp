@@ -204,9 +204,9 @@ def add_tracks(out, t, snd, label, mapping, log):
 
 
 def clip_start(info, clip):
-    """First frame of the clip on the project timeline: the clips one after the other, in order
-    (hidden ones included). Not checked against a TVPaint project export yet."""
-    return sum(c['frames'] for c in info['clips'][:clip['index'] - 1])
+    """First frame of the clip on the project timeline: the clips one after the other, in order,
+    hidden ones left out (TVPaint's project export, D02C / D02D)."""
+    return sum(c['frames'] for c in info['clips'][:clip['index'] - 1] if not c['hidden'])
 
 
 def mix_clip(clip, fps, f0, f1, mapping=(), log=print, project=None, start=0):
@@ -245,7 +245,10 @@ def export_sound(info, clip, f0, f1, path, mapping=(), log=print, project=False)
     """Writes the clip's mix to path. Returns False (and writes nothing) without any track to mix.
     project: also mix the project's tracks (TVPaint leaves them out of a clip's export)."""
     proj = info['sound']
-    if proj['tracks'] and not project:
+    if project and proj['tracks'] and clip['hidden']:
+        log("  sound: the clip is hidden in TVPaint, so not on the project timeline: project tracks left out")
+        project = False
+    elif proj['tracks'] and not project:
         log(f"  sound: {len(proj['tracks'])} project track(s) left out (TVPaint does not "
             f"export them with a clip; --project-sound includes them)")
     if not clip['sound']['tracks'] and not (project and proj['tracks']):
@@ -285,7 +288,7 @@ def main(argv):
     ap.add_argument('--ffmpeg', metavar='PATH',
                     help='ffmpeg used for sound files other than WAV (default: PATH, then next to this script)')
     ap.add_argument('--project-sound', action='store_true',
-                    help="also mix the project's sound tracks (the clips one after the other)")
+                    help="also mix the project's sound tracks (the visible clips one after the other)")
     a = ap.parse_args(argv)
     if a.ffmpeg:
         set_ffmpeg(a.ffmpeg)
