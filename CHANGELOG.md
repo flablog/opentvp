@@ -2,7 +2,7 @@
 
 Versions follow the `VERSION` file; a release is a `vX.Y.Z` tag. Frame numbers here count from 0, like the project settings (the TVPaint timeline shows +1).
 
-## Unreleased
+## 0.5.1 — 2026-11-25
 
 ### Added
 - A sound file not found at its path (often an absolute path from another machine) is looked for next to the `.tvpp`, under the same name, and used with a message: `info`, `render --sound`, the player. `opentvp info` says where it was found (`resolved` in the JSON).
