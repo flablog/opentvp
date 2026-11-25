@@ -247,8 +247,13 @@ typedef struct { double x, y, rot, zoom; } CamPt;
 /* sound: the file holds no audio, only a path per track (docs/FORMAT.md section 8) */
 typedef struct {
     char *file;
-    int found, mute;
+    char *nearby;                /* its name in the folder of the .tvpp, looked at when file is not found */
+    int found, resolved, mute;  /* resolved: file not found, nearby found (used instead) */
     double offset, volume, fade_in[2], fade_out[2];
+    /* set by each mix (for the player): why the track was not loaded ("" when it was), and
+       whether the file next to the .tvpp was used */
+    char problem[160];
+    int used_near;
 } SoundTrack;
 typedef struct { double volume; int mute; SoundTrack *t; int n; } Sound;
 
@@ -429,7 +434,24 @@ static void read_camera(Clip *c, const uint8_t *a, const uint8_t *b) {
 }
 
 /* level "sound" (project) or "audio" (clip): [level], then [level+N] per track */
-static Sound read_sound(const uint8_t *a, const uint8_t *b, const char *level) {
+static int file_exists(const char *path) {
+    FILE *fp = path[0] ? fopen_u8(path, "rb") : NULL;
+    if (fp) fclose(fp);
+    return fp != NULL;
+}
+
+/* where a sound file is also looked for: its name in the folder of the .tvpp (users often link the
+ * file with an absolute path from their own machine, then hand over both files together) */
+static char *next_to_tvpp(const char *tvpp, const char *file) {
+    const char *cut = tvpp + strlen(tvpp), *name = file + strlen(file);
+    while (cut > tvpp && cut[-1] != '/' && cut[-1] != '\\') cut--;
+    while (name > file && name[-1] != '/' && name[-1] != '\\') name--;
+    char *r = xmalloc((size_t)(cut - tvpp) + strlen(name) + 1);
+    memcpy(r, tvpp, (size_t)(cut - tvpp)); strcpy(r + (cut - tvpp), name);
+    return r;
+}
+
+static Sound read_sound(const uint8_t *a, const uint8_t *b, const char *level, const char *tvpp) {
     Sound S = {1, 0, NULL, 0};
     KVList h = read_ini_section(a, (size_t)(b - a), level);
     S.volume = kv_num(&h, "volume", 1);
@@ -445,9 +467,11 @@ static Sound read_sound(const uint8_t *a, const uint8_t *b, const char *level) {
         SoundTrack *T = &S.t[S.n++];
         const char *f = kv_get(&t, "filepath");
         T->file = strdup(f ? f : "");
-        FILE *fp = T->file[0] ? fopen_u8(T->file, "rb") : NULL;
-        T->found = fp != NULL;
-        if (fp) fclose(fp);
+        T->found = file_exists(T->file);
+        if (T->file[0]) {
+            T->nearby = next_to_tvpp(tvpp, T->file);
+            T->resolved = !T->found && file_exists(T->nearby);
+        }
         T->offset = kv_num(&t, "offset", 0);
         T->volume = kv_num(&t, "volume", 1);
         T->mute = kv_num(&t, "mute", 0) == 1;
@@ -475,7 +499,7 @@ static Project load_project(const char *path) {
     P.author = au ? strdup(au) : strdup("");
     P.modified = md ? strdup(md) : strdup("");
     if (P.width <= 0 || P.height <= 0) die("unreadable project header (not a TVPaint 11 .tvpp?)");
-    P.sound = read_sound(d, e, "sound");
+    P.sound = read_sound(d, e, "sound", path);
 
     const uint8_t *ra[4], *rb[4], *sa[64], *sb[64], *ca[256], *cb[256], *xa[2], *xb[2];
     int nr = find_sections(d, e, SEC_ROOT, ra, rb, 4);
@@ -498,7 +522,7 @@ static Project load_project(const char *path) {
                 c->mark_out = kv_num(&ch, "MarkOut", 0) == 1 ? (int)kv_num(&ch, "MarkOutPosition", 0) : -1;
                 read_layers(c, xa[0], xb[0]);
                 read_camera(c, xa[0], xb[0]);
-                c->sound = read_sound(xa[0], xb[0], "audio");
+                c->sound = read_sound(xa[0], xb[0], "audio", path);
                 const uint8_t *g1 = memfind(xa[0], (size_t)(xb[0] - xa[0]), "BGP1");
                 const uint8_t *g2 = memfind(xa[0], (size_t)(xb[0] - xa[0]), "BGP2");
                 if (g1 && g2) { memcpy(c->bg1, g1 + 8, 4); memcpy(c->bg2, g2 + 8, 4); c->has_bg = 1; }
@@ -1057,8 +1081,10 @@ static void json_sound(const Sound *S) {
     for (int i = 0; i < S->n; i++) {
         const SoundTrack *T = &S->t[i];
         printf("%s{\"index\": %d, \"file\": ", i ? ", " : "", i + 1); json_str(stdout, T->file);
-        printf(", \"found\": %s, \"offset\": %g, \"volume\": %g, \"mute\": %s, \"fade_in\": [%g, %g], \"fade_out\": [%g, %g]}",
-               T->found ? "true" : "false", T->offset, T->volume, T->mute ? "true" : "false",
+        printf(", \"found\": %s, \"resolved\": ", T->found ? "true" : "false");
+        if (T->resolved) json_str(stdout, T->nearby); else printf("null");
+        printf(", \"offset\": %g, \"volume\": %g, \"mute\": %s, \"fade_in\": [%g, %g], \"fade_out\": [%g, %g]}",
+               T->offset, T->volume, T->mute ? "true" : "false",
                T->fade_in[0], T->fade_in[1], T->fade_out[0], T->fade_out[1]);
     }
     printf("]}");
@@ -1072,7 +1098,8 @@ static void print_sound(const Sound *S, const char *title, const char *ind) {
     printf("\n");
     for (int i = 0; i < S->n; i++) {
         const SoundTrack *T = &S->t[i];
-        printf("%s  track %d: %s%s\n", ind, i + 1, T->file, T->found ? "" : "  (file not found)");
+        printf("%s  track %d: %s%s\n", ind, i + 1, T->file, T->found ? "" : T->resolved ? "  (file not found, found next to the .tvpp)"
+                                                                                       : "  (file not found, nor next to the .tvpp)");
         printf("%s    offset %g s, volume %g", ind, T->offset, T->volume);
         if (T->mute) printf(", muted");
         if (T->fade_in[1] > T->fade_in[0]) printf(", fade in %g-%g s", T->fade_in[0], T->fade_in[1]);
@@ -1661,25 +1688,41 @@ static double snd_envelope(double s, const double fin[2], const double fout[2]) 
  * of the first sample on that timeline; label names the tracks in the messages (same as the Python) */
 static void add_tracks(double *out, long long n, double t0, const Sound *S, const char *label) {
     for (int k = 0; k < S->n; k++) {
-        const SoundTrack *T = &S->t[k];
+        SoundTrack *T = &S->t[k];      /* the tracks themselves are not const: problem is set here */
+        T->problem[0] = 0; T->used_near = 0;
         if (T->mute) continue;
         char *mp = sound_map_path(T->file);
-        FILE *fp = fopen_u8(mp, "rb");
-        if (!fp) { printf("  ⚠ %s %d: file not found, skipped: %s\n", label, k + 1, mp); free(mp); continue; }
-        fclose(fp);
+        if (!file_exists(mp)) {
+            if (!T->nearby || !file_exists(T->nearby)) {
+                printf("  ⚠ %s %d: file not found (nor next to the .tvpp), skipped: %s\n", label, k + 1, mp);
+                snprintf(T->problem, sizeof T->problem, "file not found");
+                free(mp); continue;
+            }
+            free(mp); mp = strdup(T->nearby); T->used_near = 1;
+            printf("  %s %d: file not found, using the one next to the .tvpp: %s\n", label, k + 1, mp);
+        }
         Wav W; char why[128];
         const char *err = wav_read(mp, &W, why, sizeof why);
         if (err && strcmp(err, "cannot read the file")) {      /* not a WAV we read: ffmpeg, if there is one */
             const char *ff = find_ffmpeg();
-            if (!ff) { printf("  ⚠ %s %d: %s (ffmpeg not found), skipped: %s\n", label, k + 1, err, mp); free(mp); continue; }
+            if (!ff) {
+                printf("  ⚠ %s %d: %s (ffmpeg not found), skipped: %s\n", label, k + 1, err, mp);
+                snprintf(T->problem, sizeof T->problem, "%s, and ffmpeg was not found to decode it", err);
+                free(mp); continue;
+            }
             if (ffmpeg_decode(ff, mp, &W)) {
                 printf("  ⚠ %s %d: %s, ffmpeg cannot decode it either, skipped: %s\n", label, k + 1, err, mp);
+                snprintf(T->problem, sizeof T->problem, "%s, and ffmpeg cannot decode it", err);
                 free(W.x); free(mp); continue;
             }
             printf("  %s %d: %s, decoded with ffmpeg\n", label, k + 1, err);
             err = NULL;
         }
-        if (err) { printf("  ⚠ %s %d: %s, skipped: %s\n", label, k + 1, err, mp); free(mp); continue; }
+        if (err) {
+            printf("  ⚠ %s %d: %s, skipped: %s\n", label, k + 1, err, mp);
+            snprintf(T->problem, sizeof T->problem, "%s", err);
+            free(mp); continue;
+        }
         /* TVPaint places the sound on a whole 48 kHz sample (B03: +47900.016 -> +47900); with a
            negative offset it cuts one sample too few from the start (B04: -10550.016 -> -10549) */
         double ks = rint(T->offset * SND_RATE);

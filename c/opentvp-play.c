@@ -702,6 +702,9 @@ typedef struct {
     int active, start;        /* part of the sequence, and its position there */
     float *mix;               /* sound of the clip over its frames (same mix as render --sound), NULL if none */
     long long mixn;           /* frames of 2 samples at SND_RATE */
+    int snd_bad;              /* unmuted tracks that could not be loaded: the sound button turns red */
+    char snd_msg[200];        /* their message, shown once when the clip is first shown */
+    int snd_told;
 } Section;
 
 /* keyframes: a visible layer shows another drawing than on the previous frame (KEY_CHANGE), or a
@@ -1108,6 +1111,23 @@ static void section_sound(Section *s) {
     if (!any) return;
     long long n; int mixed;
     double *d = sound_mix(&s->F->P, s->C, s->f0, s->f1, project, &n, &mixed);
+    /* tracks that should play but were not loaded (each track's problem is set by the mix) */
+    int tried = 0; const char *why = NULL;
+    for (int p = 0; p < 2; p++) {
+        const Sound *X = p ? PS : S;
+        if (X->mute || (p && !project)) continue;
+        for (int k = 0; k < X->n; k++) {
+            if (X->t[k].mute) continue;
+            tried++;
+            if (X->t[k].problem[0]) { s->snd_bad++; if (!why) why = X->t[k].problem; }
+        }
+    }
+    if (why) {
+        const char *r = strstr(why, "ffmpeg was not found") ? "unsupported format (ffmpeg not found)"
+                      : strstr(why, "ffmpeg cannot decode") ? "unsupported format" : why;
+        if (s->snd_bad == tried) snprintf(s->snd_msg, sizeof s->snd_msg, "Sound not loaded: %s (Ctrl+I)", r);
+        else snprintf(s->snd_msg, sizeof s->snd_msg, "%d of %d sound tracks not loaded: %s (Ctrl+I)", s->snd_bad, tried, r);
+    }
     int silent = 1;
     for (long long i = 0; i < 2 * n && silent; i++) silent = d[i] == 0;
     if (!silent) {                       /* all silent (files not found, unreadable): no sound kept */
@@ -1467,6 +1487,18 @@ static char *fmt(const char *f, ...) {   /* small strings for one panel, freed o
     return pool[np++] = strdup(b);
 }
 
+/* label + path for a panel row (column 14), the path cut in the middle ("...") to fit the window */
+static const char *fit_path(const char *label, const char *path) {
+    int maxc = (g_ww - 32 * g_ui) / font_w() - 14 - text_width(label) / font_w();
+    int n = text_width(path) / font_w();
+    if (maxc < 24) maxc = 24;
+    if (n <= maxc) return fmt("%s%s", label, path);
+    const char *h = path, *t = path;
+    for (int i = 0; i < 10; i++) utf8_next(&h);
+    for (int i = 0; i < n - (maxc - 13); i++) utf8_next(&t);
+    return fmt("%s%.*s...%s", label, (int)(h - path), path, t);
+}
+
 static const char *seconds(int frames, double fps) { return fmt("%.2f s", frames / fps); }
 
 static void draw_info(void) {
@@ -1534,14 +1566,52 @@ static void draw_info(void) {
     if (unsup) { L[n].colour = COL_WAIT; ROW("Warning", fmt("%d layer(s) with a blending mode played as Color", unsup)); }
     {
         const Sound *S = &C->sound, *PS = &P->sound;   /* the clip's tracks, then the project's */
-        int missing = 0, muted = 0;
-        for (int k = 0; k < S->n; k++) { muted += S->t[k].mute; missing += !S->t[k].mute && !S->t[k].found; }
-        for (int k = 0; k < PS->n; k++) { muted += PS->t[k].mute; missing += !PS->t[k].mute && !PS->t[k].found; }
+        int muted = 0, lost = 0;           /* lost: muted, and the file is not found either */
+        for (int k = 0; k < S->n; k++) { muted += S->t[k].mute; lost += (S->mute || S->t[k].mute) && !S->t[k].found && !S->t[k].resolved; }
+        for (int k = 0; k < PS->n; k++) { muted += PS->t[k].mute; lost += !C->hidden && (PS->mute || PS->t[k].mute) && !PS->t[k].found && !PS->t[k].resolved; }
         const char *state = cs->mix ? (g_snd_on ? (g_snd_dev < 0 ? ", no sound output" : ", played") : ", off (M)") : ", silent";
         if (!S->n && !PS->n) ROW("Sound", "no track");
-        else ROW("Sound", fmt("%s%s%s%s%s%s", S->n ? fmt("%d track(s)", S->n) : "", S->n && PS->n ? " + " : "",
-                              PS->n ? fmt("%d project track(s)", PS->n) : "", muted ? fmt(", %d muted", muted) : "",
-                              missing ? fmt(", %d file(s) not found", missing) : "", state));
+        else {
+            if (cs->snd_bad || lost) L[n].colour = COL_WAIT;
+            ROW("Sound", fmt("%s%s%s%s%s%s%s", S->n ? fmt("%d track(s)", S->n) : "", S->n && PS->n ? " + " : "",
+                             PS->n ? fmt("%d project track(s)", PS->n) : "", muted ? fmt(", %d muted", muted) : "",
+                             lost ? fmt(", %d muted file(s) not found", lost) : "",
+                             cs->snd_bad ? fmt(", %d not loaded", cs->snd_bad) : "", state));
+        }
+        /* each track played but not loaded, in red, with where its file was looked for; a muted track
+           whose file is not found either, in red too (unmuting it would not make it play); a file
+           found next to the .tvpp instead of its own path, dim */
+        for (int p = 0; p < 2; p++) {
+            const Sound *X = p ? PS : S;
+            if (p && C->hidden) continue;
+            for (int k = 0; k < X->n && n < 80; k++) {
+                const SoundTrack *T = &X->t[k];
+                const char *who = fmt("%strack %d", p ? "project " : "", k + 1);
+                if (T->mute || X->mute) {
+                    if (T->found || T->resolved) continue;
+                    L[n].colour = COL_WAIT; ROW("", fmt("%s: muted, and its file is not found", who));
+                    L[n].colour = COL_DIM; ROW("", fit_path("  looked for: ", T->file));
+                    if (T->nearby) { L[n].colour = COL_DIM; ROW("", fit_path("  and next to the .tvpp: ", T->nearby)); }
+                    continue;
+                }
+                if (T->problem[0]) {
+                    L[n].colour = COL_WAIT; ROW("", fmt("%s: %s", who, T->problem));
+                    if (!strcmp(T->problem, "file not found")) {
+                        char *mp = sound_map_path(T->file);
+                        L[n].colour = COL_DIM; ROW("", fit_path("  looked for: ", mp));
+                        free(mp);
+                        if (T->nearby) { L[n].colour = COL_DIM; ROW("", fit_path("  and next to the .tvpp: ", T->nearby)); }
+                    } else {
+                        char *mp = T->used_near ? strdup(T->nearby) : sound_map_path(T->file);
+                        L[n].colour = COL_DIM; ROW("", fit_path("  file: ", mp));
+                        free(mp);
+                    }
+                } else if (T->used_near) {
+                    L[n].colour = COL_DIM; ROW("", fit_path(fmt("%s: not found at ", who), T->file));
+                    L[n].colour = COL_DIM; ROW("", fit_path("  found next to the .tvpp: ", T->nearby));
+                }
+            }
+        }
         if (PS->n) { L[n].colour = COL_DIM; ROW("", C->hidden ? "project tracks not played: the clip is hidden, so not on the project timeline"
                                                    : fmt("project tracks: the clip starts at frame %d of the project", clip_start(P, C))); }
     }
@@ -1574,7 +1644,8 @@ static int bar_visible(void) {
     return NFR && (!g_fullscreen || g_bar_on || g_panel || g_menu || g_vmenu || g_shift || now() - g_last_wait < 2.0);
 }
 
-static void toast(const char *m) { snprintf(g_toast, sizeof g_toast, "%s", m); g_toast_until = now() + 3.0; g_dirty = 1; }
+static void toast_for(const char *m, double secs) { snprintf(g_toast, sizeof g_toast, "%s", m); g_toast_until = now() + secs; g_dirty = 1; }
+static void toast(const char *m) { toast_for(m, 3.0); }
 
 /* the file of the current frame: with several files, the title follows the playback */
 static void update_title(void) {
@@ -1674,7 +1745,8 @@ static void draw_bar(void) {
     {
         int bx, bw; snd_button(&bx, &bw);
         fill(bx, cy - 11 * u, bw, 22 * u, g_vmenu ? 0x3a3a3a : COL_MENU);
-        draw_speaker(bx + 5 * u, cy, g_snd_dev < 0 ? COL_DIM : COL_ICON);
+        /* red when a track of the current clip could not be loaded (Ctrl+I says why) */
+        draw_speaker(bx + 5 * u, cy, NFR && sec(section_of(g_cur))->snd_bad ? COL_WAIT : (g_snd_dev < 0 ? COL_DIM : COL_ICON));
         for (int i = 0; i < 4 * u; i++) fill(bx + bw - 10 * u + i, cy - 2 * u + i, 8 * u - 2 * i, 1, COL_DIM);
     }
 
@@ -2324,6 +2396,11 @@ int main(int argc, char **argv) {
             reported = nl;
             printf("%d frame(s) loaded in %.1f s\n", nl, lt);
             fflush(stdout);
+        }
+        /* a clip whose sound could not be loaded says so once, the first time it is shown */
+        if (NFR) {
+            Section *cs = sec(section_of(g_cur));
+            if (cs->snd_bad && !cs->snd_told) { cs->snd_told = 1; toast_for(cs->snd_msg, 6.0); }
         }
         if (g_toast[0] && t >= g_toast_until) { g_toast[0] = 0; g_dirty = 1; }
         if (g_fullscreen && g_bar_on && g_playing && !g_dragging && !g_panel && !g_menu && !g_vmenu && t - g_last_move > 2.0) {

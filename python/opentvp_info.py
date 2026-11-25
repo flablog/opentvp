@@ -376,9 +376,17 @@ def camera_track(points, nframes, profile=None):
             for f in range(nframes)]
 
 
-def _sound(d, start, end, level):
+def next_to_tvpp(tvpp, file):
+    """Where a sound file is also looked for: its name in the folder of the .tvpp (users often link
+    the file with an absolute path from their own machine, then hand over both files together)."""
+    cut = max(tvpp.rfind('/'), tvpp.rfind('\\'))
+    return tvpp[:cut + 1] + re.split(r'[\\/]', file)[-1]
+
+
+def _sound(d, start, end, level, tvpp):
     """Sound tracks of the project (level 'sound') or of a clip (level 'audio'): INI sections
-    [level] then [level+N]. The audio itself is not in the file: each track gives a path."""
+    [level] then [level+N]. The audio itself is not in the file: each track gives a path. A file
+    not found there but found next to the .tvpp gives 'resolved', the path used instead."""
     def section(name):
         m = re.compile(rb'\[' + re.escape(name.encode()) + rb'\]\n((?:[^\[\n][^\n]*\n)*)').search(d, start, end)
         if not m:
@@ -392,10 +400,13 @@ def _sound(d, start, end, level):
             continue
         num = lambda k, dflt=0.0: float(t.get(k, dflt) or dflt)
         path = t.get('filepath', '')
+        found = bool(path) and os.path.isfile(path)
+        near = next_to_tvpp(tvpp, path) if path and not found else None
         tracks.append({
             'index': n + 1,
             'file': path,
-            'found': bool(path) and os.path.isfile(path),
+            'found': found,
+            'resolved': near if near and os.path.isfile(near) else None,
             'offset': num('offset'),
             'volume': num('volume', 1.0),
             'mute': t.get('mute') == '1',
@@ -459,7 +470,7 @@ def read_tvpp(path):
             'duration_s': round(frames / fps, 3) if fps else None,
             'visible_frames': visible_frames,
             'camera': cam,
-            'sound': _sound(d, a, b, 'audio'),
+            'sound': _sound(d, a, b, 'audio', path),
             'layers': layers,
         })
     return {
@@ -477,7 +488,7 @@ def read_tvpp(path):
         'output': {'width': int(hdr.get('Camera.Width', 0) or 0),
                    'height': int(hdr.get('Camera.Height', 0) or 0),
                    'fps': float(hdr.get('Camera.FrameRate', 0) or 0) or fps},
-        'sound': _sound(d, 0, len(d), 'sound'),
+        'sound': _sound(d, 0, len(d), 'sound', path),
         'clips': clips,
     }
 
@@ -505,7 +516,9 @@ def _print_sound(s, title, indent):
             line += f", fade in {t['fade_in'][0]:g}-{t['fade_in'][1]:g} s"
         if t['fade_out'][1] > t['fade_out'][0]:
             line += f", fade out {t['fade_out'][0]:g}-{t['fade_out'][1]:g} s"
-        print(f"{indent}  track {t['index']}: {t['file']}{'' if t['found'] else '  (file not found)'}")
+        where = ('' if t['found'] else '  (file not found, found next to the .tvpp)' if t['resolved']
+                 else '  (file not found, nor next to the .tvpp)')
+        print(f"{indent}  track {t['index']}: {t['file']}{where}")
         print(f"{indent}    {line}")
 
 

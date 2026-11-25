@@ -7,6 +7,8 @@
    track, the clips following one another (C = Python, byte for byte). D02C / D02D: TVPaint's
    project export (three clips, the first one hidden in D02D) matches the clips' WAVs one after
    the other, hidden clips left out.
+   A .tvpp copied alone, with its sound file next to it: the file is found there (same WAV); without
+   it, the track is reported.
 4. With ffmpeg available: the sound files re-encoded in other formats (AIFF, FLAC, MOV, MP3), under
    the same names, are decoded through ffmpeg: lossless formats give the same WAV as the sources.
    TVPaint's AAC export starts with a 1023-sample encoder delay; the first 50 ms are skipped
@@ -37,7 +39,7 @@ MAX_RMS = 0.006          # rms of (mix - TVPaint export), measured ≤ 0.0055 (B
 
 
 def sound_lines(out):
-    return [l for l in out.splitlines() if 'sound' in l]
+    return [l for l in out.splitlines() if l.startswith('  ') and 'sound' in l]   # not the header (file path)
 
 
 def export_audio(mp4):
@@ -118,6 +120,44 @@ def check_no_ffmpeg(tmp, tvpp, k):
     ok = '(ffmpeg not found)' in outs['c'] and sound_lines(outs['c']) == sound_lines(outs['python'])
     print(f'{"no ffmpeg":28s} {os.path.basename(tvpp)[:-5]} clip {k}{"":12s} {"OK" if ok else "FAIL: not reported the same way"}')
     return 0 if ok else 1
+
+
+def check_next_to_tvpp(tmp, tvpp, k, ref):
+    """Sound files linked with a path that does not exist here (no --sound-map): found next to the
+    .tvpp they are used, with a message, and give the same WAV; not found there either, reported."""
+    fails = 0
+    for case in ('next to', 'alone'):
+        d = os.path.join(tmp, 'near_' + case.replace(' ', '_'))
+        os.makedirs(d)
+        f = shutil.copy(tvpp, d)
+        info = ti.read_tvpp(f)
+        if case == 'next to':
+            for t in info['clips'][k - 1]['sound']['tracks']:
+                shutil.copy(os.path.join(DATA, 'sources_son', os.path.basename(t['file'])), d)
+        outs, wavs = {}, {}
+        for impl in ('c', 'python'):
+            o = os.path.join(d, 'out_' + impl)
+            # the linked folder may exist on this machine: mapped to a folder that does not
+            outs[impl] = run(impl, f, o, '--clip', str(k), '--scale', '0.25', '--sound',
+                             '--sound-map', MAP.split('=')[0] + '=' + os.path.join(tmp, 'nowhere'))
+            w = glob.glob(os.path.join(o, '*.wav'))
+            wavs[impl] = open(w[0], 'rb').read() if w else None
+        msg = []
+        if sound_lines(outs['c']) != sound_lines(outs['python']):
+            msg.append('C and Python sound messages differ')
+        if case == 'next to':
+            if 'using the one next to the .tvpp' not in outs['c']:
+                msg.append('file next to the .tvpp not used')
+            if wavs['c'] != ref or wavs['python'] != ref:
+                msg.append('WAV differs from the one with --sound-map')
+            if not all(t['found'] or t['resolved'] for t in ti.read_tvpp(f)['clips'][k - 1]['sound']['tracks']):
+                msg.append('info: no resolved path')
+        elif '(nor next to the .tvpp)' not in outs['c']:
+            msg.append('missing file not reported')
+        fails += bool(msg)
+        print(f'{"sound file " + case + " .tvpp":28s} {os.path.basename(tvpp)[:-5]} clip {k}{"":12s} '
+              f'{"OK" if not msg else "FAIL: " + "; ".join(msg)}')
+    return fails
 
 
 def check_project_sound(tmp):
@@ -237,6 +277,8 @@ def main():
         print()
         fails += check_project_sound(tmp)
         fails += check_project_export(tmp)
+        (tv, k), (ref, _) = next((key, v) for key, v in refs.items() if v[1])
+        fails += check_next_to_tvpp(tmp, tv, k, ref)
         if ffmpeg and refs:
             print()
             fails += check_formats(tmp, refs)

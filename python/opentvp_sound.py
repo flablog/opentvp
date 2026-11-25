@@ -157,17 +157,22 @@ def envelope(s, fade_in, fade_out):
     return g
 
 
-def add_tracks(out, t, snd, label, mapping, log):
+def add_tracks(out, t, snd, label, mapping, log, tvpp=''):
     """Adds the unmuted tracks of snd (a clip's or the project's sound) to out, t being the time of
-    each output sample on that timeline. label names the tracks in the messages."""
+    each output sample on that timeline. label names the tracks in the messages. A file not found
+    (after mapping) is looked for next to the .tvpp."""
     for tr in snd['tracks']:
         if tr['mute']:
             continue
         who = f"{label} {tr['index']}"
         path = map_path(tr['file'], mapping)
         if not os.path.isfile(path):
-            log(f"  ⚠ {who}: file not found, skipped: {path}")
-            continue
+            near = ti.next_to_tvpp(tvpp, tr['file'])
+            if not (tr['file'] and os.path.isfile(near)):
+                log(f"  ⚠ {who}: file not found (nor next to the .tvpp), skipped: {path}")
+                continue
+            path = near
+            log(f"  {who}: file not found, using the one next to the .tvpp: {path}")
         try:
             try:
                 rate, x = read_wav(path)
@@ -209,7 +214,7 @@ def clip_start(info, clip):
     return sum(c['frames'] for c in info['clips'][:clip['index'] - 1] if not c['hidden'])
 
 
-def mix_clip(clip, fps, f0, f1, mapping=(), log=print, project=None, start=0):
+def mix_clip(clip, fps, f0, f1, mapping=(), log=print, project=None, start=0, tvpp=''):
     """Mix of the clip's tracks over frames f0..f1 (from 0): float64 array samples × 2. With project
     (the project's sound), its tracks are added too, the clip starting at frame start of the project."""
     n = int(round((f1 - f0 + 1) * OUT_RATE / fps))
@@ -219,12 +224,12 @@ def mix_clip(clip, fps, f0, f1, mapping=(), log=print, project=None, start=0):
     if snd['mute']:
         log("  sound: the clip's tracks are all muted")
     else:
-        add_tracks(out, f0 / fps + i, snd, 'sound track', mapping, log)
+        add_tracks(out, f0 / fps + i, snd, 'sound track', mapping, log, tvpp)
     if project is not None and project['tracks']:
         if project['mute']:
             log("  sound: the project's tracks are all muted")
         else:
-            add_tracks(out, (start + f0) / fps + i, project, 'project sound track', mapping, log)
+            add_tracks(out, (start + f0) / fps + i, project, 'project sound track', mapping, log, tvpp)
     return out
 
 
@@ -258,7 +263,8 @@ def export_sound(info, clip, f0, f1, path, mapping=(), log=print, project=False)
     if project and proj['tracks']:
         log(f"  sound: {len(proj['tracks'])} project track(s) included (the clip starts at frame "
             f"{start} of the project)")
-    write_wav(path, mix_clip(clip, info['fps'], f0, f1, mapping, log, proj if project else None, start))
+    write_wav(path, mix_clip(clip, info['fps'], f0, f1, mapping, log, proj if project else None, start,
+                                info['file']))
     mixed = sum(1 for t in clip['sound']['tracks'] if not t['mute'])
     if project:
         mixed += sum(1 for t in proj['tracks'] if not t['mute'])
